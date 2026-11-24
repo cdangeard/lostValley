@@ -2,10 +2,10 @@ import type { Dir } from './net/protocol';
 
 /** How long one step takes on screen. The server allows one every 120 ms. */
 export const STEP_MS = 160;
-/** How long a gathering swing takes. The server allows one every 250 ms. */
-export const GATHER_MS = 300;
+/** How long a tool swing takes. The server allows one every 250 ms. */
+export const USE_MS = 300;
 
-export type Action = { kind: 'move'; dir: Dir } | { kind: 'gather' };
+export type Action = { kind: 'move'; dir: Dir } | { kind: 'use'; item: string };
 
 /**
  * Decides when the player may send the next action. The server is the
@@ -22,7 +22,7 @@ export class ActionPacer {
     if (!wanted || this.pendingSeq !== null || now < this.busyUntil) return null;
     this.seq += 1;
     this.pendingSeq = this.seq;
-    this.busyUntil = now + (wanted.kind === 'move' ? STEP_MS : GATHER_MS);
+    this.busyUntil = now + (wanted.kind === 'move' ? STEP_MS : USE_MS);
     return { seq: this.seq, action: wanted };
   }
 

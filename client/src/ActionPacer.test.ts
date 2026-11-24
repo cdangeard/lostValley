@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ActionPacer, GATHER_MS, STEP_MS } from './ActionPacer';
+import { ActionPacer, USE_MS, STEP_MS } from './ActionPacer';
 
 describe('ActionPacer', () => {
   it('sends nothing when nothing is wanted', () => {
@@ -23,20 +23,20 @@ describe('ActionPacer', () => {
     expect(p.next(STEP_MS, { kind: 'move', dir: 'left' })).not.toBeNull();
   });
 
-  it('gives gathering a longer swing', () => {
+  it('gives tools a longer swing', () => {
     const p = new ActionPacer();
-    p.next(0, { kind: 'gather' });
+    p.next(0, { kind: 'use', item: 'houe' });
     p.acked(1);
-    expect(p.next(STEP_MS, { kind: 'gather' })).toBeNull();
-    expect(p.next(GATHER_MS, { kind: 'gather' })).not.toBeNull();
+    expect(p.next(STEP_MS, { kind: 'use', item: 'houe' })).toBeNull();
+    expect(p.next(USE_MS, { kind: 'use', item: 'houe' })).not.toBeNull();
   });
 
   it('ignores stale acks and recovers after reset', () => {
     const p = new ActionPacer();
-    p.next(0, { kind: 'gather' });
+    p.next(0, { kind: 'use', item: 'houe' });
     p.acked(99);
-    expect(p.next(1000, { kind: 'gather' })).toBeNull();
+    expect(p.next(1000, { kind: 'use', item: 'houe' })).toBeNull();
     p.reset();
-    expect(p.next(1000, { kind: 'gather' })).not.toBeNull();
+    expect(p.next(1000, { kind: 'use', item: 'houe' })).not.toBeNull();
   });
 });

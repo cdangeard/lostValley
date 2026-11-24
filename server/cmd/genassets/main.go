@@ -505,12 +505,6 @@ func buildMap(rng *rand.Rand) tiledMap {
 	for y := houseY + houseH; y < pathY; y++ {
 		set(houseDoorX, y, tPath)
 	}
-	// A patch of good soil next to the clearing, ready for the hoe.
-	for y := 20; y < 25; y++ {
-		for x := 10; x < 17; x++ {
-			set(x, y, tTilled)
-		}
-	}
 
 	var objects []tiledObject
 	nextID := 1
