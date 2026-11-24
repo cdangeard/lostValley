@@ -15,12 +15,28 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   border-radius: 6px; padding: 6px 10px; }
 #status { top: 12px; left: 12px; color: var(--muted); }
 #status.online { color: var(--text); }
-#inventory { top: 12px; right: 12px; display: flex; gap: 12px; }
+#clock { top: 12px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#clock:empty, #energy:empty, #toast:empty { display: none; }
+#energy { top: 52px; left: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+#energy .bar { display: inline-block; width: 110px; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+#energy .bar span { display: block; height: 100%; background: #8cc063; transition: width 200ms; }
+#energy.low .bar span { background: #d9694a; }
+#inventory { top: 12px; right: 12px; display: flex; gap: 12px; flex-wrap: wrap; max-width: 46vw; justify-content: flex-end; }
 #inventory:empty { display: none; }
 #inventory .item { display: flex; align-items: center; gap: 6px; }
 #inventory .count { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
 #inventory .bump { animation: bump 300ms ease-out; }
 @keyframes bump { 50% { transform: scale(1.35); } }
-#help { bottom: 12px; left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 13px;
-  white-space: nowrap; }
-@media (max-width: 520px) { #help { white-space: normal; width: calc(100% - 32px); text-align: center; } }
+#bottom { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex;
+  flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 32px); }
+#help { position: static; color: var(--muted); font-size: 12px; text-align: center; }
+#hotbar { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+#hotbar .slot { position: relative; font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
+  border: 1px solid rgba(224, 178, 92, 0.3); border-radius: 6px; padding: 6px 10px 6px 20px; cursor: pointer; }
+#hotbar .slot.seed { color: #d6e8b8; }
+#hotbar .slot.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: rgba(60, 48, 24, 0.9); }
+#hotbar .key { position: absolute; top: 3px; left: 6px; font-size: 10px; color: var(--muted); }
+#hotbar .count { margin-left: 6px; color: var(--accent); font-weight: 600; }
+#toast { top: 92px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 250ms; text-align: center; }
+#toast.show { opacity: 1; }
+@media (max-width: 720px) { #clock { top: 52px; left: auto; right: 12px; transform: none; } #energy { top: 92px; } #toast { top: 132px; } }

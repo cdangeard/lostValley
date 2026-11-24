@@ -1,0 +1,70 @@
+{
+  "temps": {
+    "jourEnLigneSecondes": 1080,
+    "jourHorsLigneSecondes": 3600,
+    "heureReveil": 6,
+    "heureEvanouissement": 2,
+    "joursParSaison": 28,
+    "saisons": ["Printemps", "Été", "Automne", "Hiver"],
+    "chancePluie": 0.2,
+    "rattrapageMaxJours": 120
+  },
+  "energie": { "max": 100, "apresEvanouissement": 50 },
+  "arrosoirCapacite": 20,
+  "outils": {
+    "houe": { "nom": "Houe", "energie": 2 },
+    "arrosoir": { "nom": "Arrosoir", "energie": 1 },
+    "faux": { "nom": "Faux", "energie": 1 },
+    "hache": { "nom": "Hache", "energie": 3 },
+    "pioche": { "nom": "Pioche", "energie": 3 }
+  },
+  "outilsDeDepart": ["houe", "arrosoir", "faux", "hache", "pioche"],
+  "sacDeDepart": { "graine-navet": 12, "graine-ble": 6, "graine-feve": 6 },
+  "parcelles": {
+    "joursSansSoinAvantFriche": 4,
+    "joursSecsAvantFane": 3,
+    "joursFaneAvantGraines": 3,
+    "joursMurAvantGraines": 4
+  },
+  "fauchage": {
+    "chanceGraine": 0.15,
+    "graines": ["graine-navet", "graine-ble", "graine-feve"]
+  },
+  "cultures": {
+    "navet": {
+      "nom": "Navet", "graine": "graine-navet", "jours": 4,
+      "recolte": "navet", "quantite": 1,
+      "mutation": "navet-lune", "chanceMutation": 0.25
+    },
+    "ble": {
+      "nom": "Blé", "graine": "graine-ble", "jours": 6,
+      "recolte": "ble", "quantite": 2,
+      "mutation": "ble-ambre", "chanceMutation": 0.2
+    },
+    "feve": {
+      "nom": "Fève", "graine": "graine-feve", "jours": 5,
+      "recolte": "feve", "quantite": 3,
+      "mutation": "feve-ronce", "chanceMutation": 0.2
+    },
+    "navet-lune": {
+      "nom": "Navet-lune", "graine": "graine-navet-lune", "jours": 3, "sauvage": true,
+      "recolte": "navet-lune", "quantite": 1, "chanceGraine": 0.5
+    },
+    "ble-ambre": {
+      "nom": "Blé d'ambre", "graine": "graine-ble-ambre", "jours": 5, "sauvage": true,
+      "recolte": "ble-ambre", "quantite": 2, "chanceGraine": 0.5
+    },
+    "feve-ronce": {
+      "nom": "Fève-ronce", "graine": "graine-feve-ronce", "jours": 4, "sauvage": true,
+      "recolte": "feve-ronce", "quantite": 2, "chanceGraine": 0.5
+    }
+  },
+  "objets": {
+    "bois": "Bois", "pierre": "Pierre", "fibre": "Fibre",
+    "navet": "Navet", "ble": "Blé", "feve": "Fève",
+    "navet-lune": "Navet-lune", "ble-ambre": "Blé d'ambre", "feve-ronce": "Fève-ronce",
+    "graine-navet": "Graines de navet", "graine-ble": "Graines de blé", "graine-feve": "Graines de fève",
+    "graine-navet-lune": "Graines de navet-lune", "graine-ble-ambre": "Graines de blé d'ambre",
+    "graine-feve-ronce": "Graines de fève-ronce"
+  }
+}

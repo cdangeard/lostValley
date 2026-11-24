@@ -14,6 +14,7 @@ import (
 
 	"github.com/cdangeard/lostvalley/server/internal/game"
 	"github.com/cdangeard/lostvalley/server/internal/protocol"
+	"github.com/cdangeard/lostvalley/server/internal/store"
 	"github.com/cdangeard/lostvalley/server/internal/world"
 )
 
@@ -28,7 +29,14 @@ func startServer(t *testing.T) string {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	inst := game.NewInstance("test", m, log)
+	content, err := world.LoadContent("../../../assets/data/contenu.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := game.Open(ctx, game.Config{DomainID: "test", MapName: "test", Map: m, Content: content, Store: store.NewMemory(), Log: log})
+	if err != nil {
+		t.Fatal(err)
+	}
 	go inst.Run(ctx, 50*time.Millisecond)
 	srv := httptest.NewServer(&Handler{Instance: inst, Log: log})
 	t.Cleanup(srv.Close)

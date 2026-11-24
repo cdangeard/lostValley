@@ -13,7 +13,10 @@ const (
 	LayerResources = "ressources"
 	LayerMarkers   = "reperes"
 	MarkerSpawn    = "apparition"
+	MarkerBed      = "lit"
 	PropBlocking   = "bloquant"
+	PropCultivable = "cultivable" // the hoe may till this ground
+	PropWater      = "eau"        // the watering can refills here
 )
 
 // Map is the static part of a domain, loaded from a Tiled JSON export.
@@ -21,8 +24,13 @@ type Map struct {
 	Width, Height int
 	TileSize      int
 	blocked       []bool
+	cultivable    []bool
+	water         []bool
 	Resources     []ResourceSpawn
 	Spawn         Point
+	// Bed is where players sleep; HasBed is false on maps without one.
+	Bed    Point
+	HasBed bool
 }
 
 // ResourceSpawn is where a resource node starts on the map.
@@ -36,9 +44,28 @@ func (m *Map) InBounds(p Point) bool {
 	return p.X >= 0 && p.Y >= 0 && p.X < m.Width && p.Y < m.Height
 }
 
-// Blocked reports whether the ground itself stops movement (water, cliffs…).
+// Blocked reports whether the ground itself stops movement (water, cliffs,
+// walls, the bed…).
 func (m *Map) Blocked(p Point) bool {
-	return !m.InBounds(p) || m.blocked[p.Y*m.Width+p.X]
+	return !m.InBounds(p) || m.blocked[p.Y*m.Width+p.X] || (m.HasBed && p == m.Bed)
+}
+
+// Cultivable reports whether the hoe may till the ground at p.
+func (m *Map) Cultivable(p Point) bool {
+	return m.InBounds(p) && m.cultivable[p.Y*m.Width+p.X] && !m.Blocked(p)
+}
+
+// Water reports whether p is water the watering can can draw from.
+func (m *Map) Water(p Point) bool {
+	return m.InBounds(p) && m.water[p.Y*m.Width+p.X]
+}
+
+// WakeSpot is where a player wakes up: in front of the bed, or at the spawn.
+func (m *Map) WakeSpot() Point {
+	if m.HasBed {
+		return Point{m.Bed.X, m.Bed.Y + 1}
+	}
+	return m.Spawn
 }
 
 type tiledProperty struct {
@@ -95,21 +122,31 @@ func ParseMap(raw []byte) (*Map, error) {
 		return nil, fmt.Errorf("parse tiled map: tiles must be square, got %dx%d", f.TileWidth, f.TileHeight)
 	}
 
-	blockingGID := map[int]bool{}
+	blockingGID, cultivableGID, waterGID := map[int]bool{}, map[int]bool{}, map[int]bool{}
 	for _, ts := range f.Tilesets {
 		if ts.Source != "" {
 			return nil, fmt.Errorf("parse tiled map: external tileset %q not supported, embed it in the map", ts.Source)
 		}
 		for _, t := range ts.Tiles {
 			for _, p := range t.Properties {
-				if p.Name == PropBlocking && p.Value == true {
+				if p.Value != true {
+					continue
+				}
+				switch p.Name {
+				case PropBlocking:
 					blockingGID[ts.FirstGID+t.ID] = true
+				case PropCultivable:
+					cultivableGID[ts.FirstGID+t.ID] = true
+				case PropWater:
+					waterGID[ts.FirstGID+t.ID] = true
 				}
 			}
 		}
 	}
 
-	m := &Map{Width: f.Width, Height: f.Height, TileSize: f.TileWidth, blocked: make([]bool, f.Width*f.Height)}
+	n := f.Width * f.Height
+	m := &Map{Width: f.Width, Height: f.Height, TileSize: f.TileWidth,
+		blocked: make([]bool, n), cultivable: make([]bool, n), water: make([]bool, n)}
 	ts := float64(f.TileWidth)
 	foundGround, foundSpawn := false, false
 	for _, l := range f.Layers {
@@ -120,7 +157,10 @@ func ParseMap(raw []byte) (*Map, error) {
 			}
 			for i, gid := range l.Data {
 				// The top 4 bits of a gid are flip flags.
-				m.blocked[i] = blockingGID[gid&0x0fffffff]
+				gid &= 0x0fffffff
+				m.blocked[i] = blockingGID[gid]
+				m.cultivable[i] = cultivableGID[gid]
+				m.water[i] = waterGID[gid]
 			}
 			foundGround = true
 		case l.Name == LayerResources && l.Type == "objectgroup":
@@ -140,9 +180,13 @@ func ParseMap(raw []byte) (*Map, error) {
 			}
 		case l.Name == LayerMarkers && l.Type == "objectgroup":
 			for _, o := range l.Objects {
-				if o.Name == MarkerSpawn {
+				switch o.Name {
+				case MarkerSpawn:
 					m.Spawn = Point{int(o.X / ts), int(o.Y / ts)}
 					foundSpawn = true
+				case MarkerBed:
+					m.Bed = Point{int(o.X / ts), int(o.Y / ts)}
+					m.HasBed = true
 				}
 			}
 		}
@@ -155,6 +199,9 @@ func ParseMap(raw []byte) (*Map, error) {
 	}
 	if m.Blocked(m.Spawn) {
 		return nil, fmt.Errorf("parse tiled map: spawn %v is on a blocking tile", m.Spawn)
+	}
+	if m.HasBed && (!m.InBounds(m.Bed) || m.Blocked(m.WakeSpot())) {
+		return nil, fmt.Errorf("parse tiled map: the tile below the bed %v must be free", m.Bed)
 	}
 	return m, nil
 }

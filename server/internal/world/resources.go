@@ -4,6 +4,7 @@ import "time"
 
 // ResourceKind describes a gatherable node placed on the map in Tiled.
 type ResourceKind struct {
+	Tool   string        // the tool that strikes it
 	Hits   int           // strikes needed to deplete it
 	Item   string        // what it drops
 	Amount int           // how many it drops when depleted
@@ -13,12 +14,11 @@ type ResourceKind struct {
 }
 
 // ResourceKinds lists every kind a map may use, keyed by the Tiled object type.
-// Tools are not modelled yet: in phase 1 the axe, pickaxe and scythe will gate
-// these and change the number of hits.
+// Regrowth follows real time, online or not.
 var ResourceKinds = map[string]ResourceKind{
-	"arbre":  {Hits: 3, Item: "bois", Amount: 3, Regrow: 3 * time.Minute, BlocksWhenDepleted: true},
-	"rocher": {Hits: 4, Item: "pierre", Amount: 2, Regrow: 5 * time.Minute},
-	"herbes": {Hits: 1, Item: "fibre", Amount: 1, Regrow: 90 * time.Second},
+	"arbre":  {Tool: "hache", Hits: 3, Item: "bois", Amount: 3, Regrow: 3 * time.Minute, BlocksWhenDepleted: true},
+	"rocher": {Tool: "pioche", Hits: 4, Item: "pierre", Amount: 2, Regrow: 5 * time.Minute},
+	"herbes": {Tool: "faux", Hits: 1, Item: "fibre", Amount: 1, Regrow: 90 * time.Second},
 }
 
 // ResourceNode is one live resource in a domain.
