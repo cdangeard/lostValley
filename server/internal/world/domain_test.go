@@ -9,8 +9,9 @@ import (
 	"github.com/cdangeard/lostvalley/server/internal/protocol"
 )
 
-// testMap builds a small Tiled map from ASCII art:
-// '.' grass, '~' water (blocking), 'T' tree, 'R' rock, 'h' tall grass, '@' spawn.
+// testMap builds a small Tiled map from ASCII art: '.' cultivable grass,
+// '~' water (blocking, refills the can), '#' wall, 'T' tree, 'R' rock,
+// 'h' tall grass, '@' spawn, 'B' bed.
 func testMap(t *testing.T, rows ...string) *Map {
 	t.Helper()
 	w, h := len(rows[0]), len(rows)
@@ -21,8 +22,11 @@ func testMap(t *testing.T, rows ...string) *Map {
 	for y, row := range rows {
 		for x, c := range row {
 			gid := "1"
-			if c == '~' {
+			switch c {
+			case '~':
 				gid = "2"
+			case '#':
+				gid = "3"
 			}
 			data = append(data, gid)
 			kind := map[rune]string{'T': "arbre", 'R': "rocher", 'h': "herbes"}[c]
@@ -30,8 +34,12 @@ func testMap(t *testing.T, rows ...string) *Map {
 				objects = append(objects, fmt.Sprintf(`{"id":%d,"type":%q,"x":%d,"y":%d}`, id, kind, x*16, y*16))
 				id++
 			}
-			if c == '@' {
-				spawn = fmt.Sprintf(`{"id":%d,"name":"apparition","x":%d,"y":%d}`, id, x*16, y*16)
+			if c == '@' || c == 'B' {
+				name := map[rune]string{'@': "apparition", 'B': "lit"}[c]
+				if spawn != "" {
+					spawn += ","
+				}
+				spawn += fmt.Sprintf(`{"id":%d,"name":%q,"x":%d,"y":%d}`, id, name, x*16, y*16)
 				id++
 			}
 		}
@@ -43,7 +51,10 @@ func testMap(t *testing.T, rows ...string) *Map {
 	    {"name":"ressources","type":"objectgroup","objects":[%s]},
 	    {"name":"reperes","type":"objectgroup","objects":[%s]}
 	  ],
-	  "tilesets":[{"firstgid":1,"tiles":[{"id":1,"properties":[{"name":"bloquant","type":"bool","value":true}]}]}]
+	  "tilesets":[{"firstgid":1,"tiles":[
+	    {"id":0,"properties":[{"name":"cultivable","type":"bool","value":true}]},
+	    {"id":1,"properties":[{"name":"bloquant","type":"bool","value":true},{"name":"eau","type":"bool","value":true}]},
+	    {"id":2,"properties":[{"name":"bloquant","type":"bool","value":true}]}]}]
 	}`, w, h, strings.Join(data, ","), strings.Join(objects, ","), spawn)
 	m, err := ParseMap([]byte(raw))
 	if err != nil {
@@ -54,13 +65,35 @@ func testMap(t *testing.T, rows ...string) *Map {
 
 var t0 = time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 
+// testContent is the real content file with the weather made predictable.
+func testContent(t *testing.T) *Content {
+	t.Helper()
+	c, err := LoadContent("../../../assets/data/contenu.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Time.RainChance = 0
+	return c
+}
+
 func joined(t *testing.T, m *Map, ids ...string) *Domain {
 	t.Helper()
-	d := NewDomain(m)
+	d := NewDomain(m, testContent(t), 1)
 	for _, id := range ids {
-		d.Join(id, id)
+		d.Join(id, id, t0)
 	}
 	return d
+}
+
+// count returns how many events carry a message of type T.
+func count[T any](events []Event) int {
+	n := 0
+	for _, e := range events {
+		if _, ok := e.Msg.(T); ok {
+			n++
+		}
+	}
+	return n
 }
 
 func TestParseMap(t *testing.T) {
@@ -171,14 +204,14 @@ func TestGatherTreeYieldsWoodAndLeavesAStump(t *testing.T) {
 	now := t0
 	for i := 0; i < ResourceKinds["arbre"].Hits; i++ {
 		now = now.Add(time.Second)
-		if r := d.Gather("ana", now); !r.OK {
+		if r := d.Use("ana", "hache", now); !r.OK {
 			t.Fatalf("hit %d: %+v", i, r)
 		}
 	}
-	if got := d.Player("ana").Inventory["bois"]; got != ResourceKinds["arbre"].Amount {
+	if got := d.Player("ana").Bag["bois"]; got != ResourceKinds["arbre"].Amount {
 		t.Fatalf("bois = %d", got)
 	}
-	if r := d.Gather("ana", now.Add(time.Second)); r.Reason != ReasonNothing {
+	if r := d.Use("ana", "hache", now.Add(time.Second)); r.Reason != ReasonNothing {
 		t.Fatalf("depleted tree: %+v", r)
 	}
 	if d.Walkable(Point{1, 0}) {
@@ -189,14 +222,14 @@ func TestGatherTreeYieldsWoodAndLeavesAStump(t *testing.T) {
 func TestGatherCooldownAndEmptyTile(t *testing.T) {
 	m := testMap(t, "@R.")
 	d := joined(t, m, "ana")
-	if r := d.Gather("ana", t0); r.Reason != ReasonNothing {
+	if r := d.Use("ana", "pioche", t0); r.Reason != ReasonNothing {
 		t.Fatalf("facing down onto nothing: %+v", r)
 	}
 	d.Move("ana", protocol.Right, t0)
-	if r := d.Gather("ana", t0.Add(time.Second)); !r.OK {
+	if r := d.Use("ana", "pioche", t0.Add(time.Second)); !r.OK {
 		t.Fatal(r)
 	}
-	if r := d.Gather("ana", t0.Add(time.Second+GatherCooldown/2)); r.Reason != ReasonTooFast {
+	if r := d.Use("ana", "pioche", t0.Add(time.Second+UseCooldown/2)); r.Reason != ReasonTooFast {
 		t.Fatalf("gather spam: %+v", r)
 	}
 }
@@ -205,7 +238,7 @@ func TestInventoryEventGoesOnlyToGatherer(t *testing.T) {
 	m := testMap(t, "@h.")
 	d := joined(t, m, "ana", "bob")
 	d.Move("ana", protocol.Right, t0)
-	r := d.Gather("ana", t0.Add(time.Second))
+	r := d.Use("ana", "faux", t0.Add(time.Second))
 	var inv, res int
 	for _, e := range r.Events {
 		switch e.Msg.(type) {
@@ -230,18 +263,18 @@ func TestRegrowth(t *testing.T) {
 	m := testMap(t, "@h.")
 	d := joined(t, m, "ana")
 	d.Move("ana", protocol.Right, t0)
-	d.Gather("ana", t0.Add(time.Second))
+	d.Use("ana", "faux", t0.Add(time.Second))
 
 	// Cut grass can be walked on, and does not regrow under a player.
 	if r := d.Move("ana", protocol.Right, t0.Add(2*time.Second)); !r.OK {
 		t.Fatalf("walk onto cut grass: %+v", r)
 	}
-	later := t0.Add(time.Hour)
-	if ev := d.Tick(later); len(ev) != 0 {
+	later := t0.Add(2 * time.Minute)
+	if ev := d.Tick(later); count[protocol.Resource](ev) != 0 {
 		t.Fatalf("regrew under the player: %+v", ev)
 	}
 	d.Move("ana", protocol.Right, later)
-	if ev := d.Tick(later); len(ev) != 1 {
+	if ev := d.Tick(later); count[protocol.Resource](ev) != 1 {
 		t.Fatalf("expected regrowth once the tile is free, got %+v", ev)
 	}
 	if d.Walkable(Point{1, 0}) {
@@ -256,10 +289,10 @@ func TestRegrowthHappensWhileOffline(t *testing.T) {
 	now := t0
 	for i := 0; i < ResourceKinds["arbre"].Hits; i++ {
 		now = now.Add(time.Second)
-		d.Gather("ana", now)
+		d.Use("ana", "hache", now)
 	}
-	d.Leave("ana")
-	if ev := d.Tick(now.Add(ResourceKinds["arbre"].Regrow + time.Second)); len(ev) != 1 {
+	d.Leave("ana", now)
+	if ev := d.Tick(now.Add(ResourceKinds["arbre"].Regrow + time.Second)); count[protocol.Resource](ev) != 1 {
 		t.Fatalf("tree should regrow with nobody online: %+v", ev)
 	}
 }
@@ -268,18 +301,18 @@ func TestRejoinKeepsPositionAndBag(t *testing.T) {
 	m := testMap(t, "@h.")
 	d := joined(t, m, "ana")
 	d.Move("ana", protocol.Right, t0)
-	d.Gather("ana", t0.Add(time.Second))
+	d.Use("ana", "faux", t0.Add(time.Second))
 	d.Move("ana", protocol.Right, t0.Add(2*time.Second))
-	d.Leave("ana")
+	d.Leave("ana", t0.Add(3*time.Second))
 
 	w := d.Welcome("bob", "test")
 	if len(w.Players) != 0 {
 		t.Fatalf("offline players should not be listed: %+v", w.Players)
 	}
 
-	d.Join("ana", "")
+	d.Join("ana", "", t0.Add(4*time.Second))
 	p := d.Player("ana")
-	if p.Pos != (Point{1, 0}) || p.Inventory["fibre"] != 1 || p.Name != "ana" {
+	if p.Pos != (Point{1, 0}) || p.Bag["fibre"] < 1 || p.Name != "ana" {
 		t.Fatalf("player after rejoin: %+v", p)
 	}
 }
@@ -290,7 +323,10 @@ func TestValleyMapLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDomain(m)
+	d := NewDomain(m, testContent(t), 1)
+	if !m.HasBed || !d.Walkable(m.WakeSpot()) {
+		t.Fatal("the valley needs a bed with a free tile below it")
+	}
 	seen := map[Point]bool{m.Spawn: true}
 	queue := []Point{m.Spawn}
 	for len(queue) > 0 {
@@ -306,6 +342,23 @@ func TestValleyMapLoads(t *testing.T) {
 	}
 	if len(seen) < m.Width*m.Height/3 {
 		t.Fatalf("only %d tiles reachable from spawn", len(seen))
+	}
+	if !seen[m.WakeSpot()] {
+		t.Fatal("the bed cannot be reached from the spawn")
+	}
+	cultivable, water := 0, 0
+	for p := range seen {
+		if m.Cultivable(p) {
+			cultivable++
+		}
+		for _, dir := range []string{protocol.Up, protocol.Down, protocol.Left, protocol.Right} {
+			if m.Water(p.Step(dir)) {
+				water++
+			}
+		}
+	}
+	if cultivable < 50 || water == 0 {
+		t.Fatalf("reachable: %d cultivable tiles, %d spots next to water", cultivable, water)
 	}
 	kinds := map[string]int{}
 	for _, r := range m.Resources {

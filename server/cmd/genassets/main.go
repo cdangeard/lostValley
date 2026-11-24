@@ -32,6 +32,8 @@ const (
 	tSand
 	tTilled
 	tBridge
+	tFloor // inside the house
+	tWall
 	terrainCount
 )
 
@@ -47,6 +49,20 @@ const (
 	fPlayerLeft
 	fPlayerRight
 	fPlayerUp
+	fBed
+	fSoilDry // tilled plot overlays
+	fSoilWet
+	fSeed // generic growth stages
+	fSprout
+	fYoung
+	fRipeNavet
+	fRipeBle
+	fRipeFeve
+	fRipeNavetLune
+	fRipeBleAmbre
+	fRipeFeveRonce
+	fWithered
+	fWeeds
 	entityCount
 )
 
@@ -160,6 +176,21 @@ func drawTerrain(rng *rand.Rand) image.Image {
 	}
 	c.rect(tBridge, 0, 0, tile, 1, hex("#5a3d22"))
 	c.rect(tBridge, 0, tile-1, tile, 1, hex("#5a3d22"))
+
+	// Phase 1 tiles use their own random source so older tiles stay identical.
+	r2 := rand.New(rand.NewSource(101))
+	c.fill(tFloor, hex("#a77b4f"))
+	for y := 3; y < tile; y += 4 {
+		c.rect(tFloor, 0, y, tile, 1, hex("#8d6440"))
+	}
+	c.speckle(tFloor, r2, 10, hex("#b88a5c"))
+
+	c.fill(tWall, hex("#6b4a2f"))
+	for y := 0; y < tile; y += 5 {
+		c.rect(tWall, 0, y, tile, 1, hex("#4e3521"))
+	}
+	c.rect(tWall, 0, 0, tile, 2, hex("#8f3f2e")) // a strip of roof
+	c.speckle(tWall, r2, 8, hex("#7d5838"))
 	return c.img
 }
 
@@ -207,7 +238,94 @@ func drawEntities(rng *rand.Rand) image.Image {
 	drawPlayer(c, fPlayerLeft, "left")
 	drawPlayer(c, fPlayerRight, "right")
 	drawPlayer(c, fPlayerUp, "up")
+	drawFarm(c)
 	return c.img
+}
+
+// drawFarm draws the bed and everything that grows in a plot.
+func drawFarm(c canvas) {
+	r := rand.New(rand.NewSource(202))
+
+	// Bed, seen from above: wooden frame, blanket, pillow at the top.
+	c.rect(fBed, 2, 1, 12, 14, hex("#6e4a2b"))
+	c.rect(fBed, 3, 2, 10, 4, hex("#efe6cf"))
+	c.rect(fBed, 3, 6, 10, 8, hex("#3f6e9e"))
+	c.rect(fBed, 3, 6, 10, 1, hex("#5b8ac0"))
+
+	// Tilled soil, dry and watered, drawn over the ground.
+	for _, f := range []struct {
+		frame       int
+		base, ridge string
+	}{{fSoilDry, "#8a5f3a", "#6b4529"}, {fSoilWet, "#5a3b24", "#432a18"}} {
+		c.rect(f.frame, 1, 1, 14, 14, hex(f.base))
+		for y := 2; y < 15; y += 3 {
+			c.rect(f.frame, 2, y, 12, 1, hex(f.ridge))
+		}
+	}
+
+	leaf, leafD := hex("#6fbf4a"), hex("#4f9a35")
+	// Seed: a few grains in the soil.
+	for _, p := range [][2]int{{6, 8}, {9, 7}, {8, 10}} {
+		c.px(fSeed, p[0], p[1], hex("#e6d6a6"))
+	}
+	// Sprout: two small leaves.
+	c.rect(fSprout, 8, 9, 1, 4, leafD)
+	c.rect(fSprout, 6, 8, 2, 1, leaf)
+	c.rect(fSprout, 9, 7, 2, 1, leaf)
+	// Young plant: a small tuft.
+	for i := 0; i < 5; i++ {
+		x := 5 + i*2
+		h := 4 + r.Intn(3)
+		c.rect(fYoung, x, 13-h, 1, h, []color.RGBA{leaf, leafD}[i%2])
+	}
+
+	ripeRoot := func(f int, root, top string) {
+		c.disc(f, 8, 11, 3.5, hex(root))
+		c.disc(f, 7, 10, 1.2, hex("#ffffff"))
+		for i := 0; i < 4; i++ {
+			c.rect(f, 5+i*2, 2+i%2, 1, 6, hex(top))
+		}
+	}
+	ripeGrain := func(f int, stalk, ear string) {
+		for i := 0; i < 5; i++ {
+			x := 3 + i*2 + r.Intn(2)
+			c.rect(f, x, 6, 1, 9, hex(stalk))
+			c.rect(f, x, 2+r.Intn(2), 1, 4, hex(ear))
+		}
+	}
+	ripePods := func(f int, leafCol, pod string) {
+		c.rect(f, 7, 3, 2, 12, hex(leafCol))
+		c.disc(f, 5, 6, 2.5, hex(leafCol))
+		c.disc(f, 11, 9, 2.5, hex(leafCol))
+		c.rect(f, 4, 9, 2, 4, hex(pod))
+		c.rect(f, 10, 4, 2, 4, hex(pod))
+	}
+	ripeRoot(fRipeNavet, "#e9e1f0", "#5aa83f")
+	ripeGrain(fRipeBle, "#c9a646", "#e8c95a")
+	ripePods(fRipeFeve, "#4f9a35", "#9bd06a")
+	// Wild variants: same shapes, stranger colours.
+	ripeRoot(fRipeNavetLune, "#b9c7f2", "#7c8fd6")
+	c.px(fRipeNavetLune, 10, 12, hex("#f6f2ff"))
+	ripeGrain(fRipeBleAmbre, "#b9772f", "#f0a040")
+	ripePods(fRipeFeveRonce, "#3b6b3a", "#c0476a")
+	c.px(fRipeFeveRonce, 6, 4, hex("#e6e0c6"))
+	c.px(fRipeFeveRonce, 12, 12, hex("#e6e0c6"))
+
+	// Withered crop: bent brown stalks.
+	for i := 0; i < 4; i++ {
+		x := 4 + i*3
+		c.rect(fWithered, x, 9, 1, 5, hex("#8a6a3a"))
+		c.px(fWithered, x+1, 8, hex("#a5844f"))
+	}
+	// Weeds: a dense, messy tangle.
+	for i := 0; i < 14; i++ {
+		x := 1 + r.Intn(14)
+		h := 3 + r.Intn(8)
+		col := []color.RGBA{hex("#5d8c3a"), hex("#7aa846"), hex("#4a7030"), hex("#8f6f3a")}[r.Intn(4)]
+		c.rect(fWeeds, x, tile-1-h, 1, h, col)
+	}
+	c.px(fWeeds, 4, 6, hex("#d6c35a"))
+	c.px(fWeeds, 11, 8, hex("#d6c35a"))
 }
 
 func drawPlayer(c canvas, f int, dir string) {
@@ -313,6 +431,10 @@ type tiledMap struct {
 const (
 	mapW = 48
 	mapH = 32
+
+	houseX, houseY, houseW, houseH = 4, 9, 6, 5
+	houseDoorX                     = 7
+	bedX, bedY                     = 5, 10
 )
 
 func buildMap(rng *rand.Rand) tiledMap {
@@ -353,9 +475,9 @@ func buildMap(rng *rand.Rand) tiledMap {
 			set(riverX+dx, y, tWater)
 		}
 	}
-	// A path from the clearing east to a bridge across the river.
+	// A path from the house east to a bridge across the river.
 	pathY := 17
-	for x := 8; x < mapW-2; x++ {
+	for x := houseDoorX; x < mapW-2; x++ {
 		if get(x, pathY) == tWater {
 			set(x, pathY, tBridge)
 			set(x, pathY+1, tBridge)
@@ -368,7 +490,22 @@ func buildMap(rng *rand.Rand) tiledMap {
 	for y := 7; y < pathY; y++ {
 		set(13, y, tPath)
 	}
-	// Tilled field next to the clearing (phase 1 will plant here).
+	// The house: wooden walls, a floor, a door to the south and a bed.
+	for y := houseY; y < houseY+houseH; y++ {
+		for x := houseX; x < houseX+houseW; x++ {
+			edge := x == houseX || y == houseY || x == houseX+houseW-1 || y == houseY+houseH-1
+			if edge {
+				set(x, y, tWall)
+			} else {
+				set(x, y, tFloor)
+			}
+		}
+	}
+	set(houseDoorX, houseY+houseH-1, tFloor)
+	for y := houseY + houseH; y < pathY; y++ {
+		set(houseDoorX, y, tPath)
+	}
+	// A patch of good soil next to the clearing, ready for the hoe.
 	for y := 20; y < 25; y++ {
 		for x := 10; x < 17; x++ {
 			set(x, y, tTilled)
@@ -446,7 +583,12 @@ func buildMap(rng *rand.Rand) tiledMap {
 	spawn := tiledObject{ID: nextID, Name: "apparition", Type: "apparition",
 		X: 13 * tile, Y: 15 * tile, Width: tile, Height: tile, Visible: true}
 	nextID++
+	bed := tiledObject{ID: nextID, Name: "lit", Type: "lit",
+		X: bedX * tile, Y: bedY * tile, Width: tile, Height: tile, Visible: true}
+	nextID++
 
+	blocking := tiledProp{Name: "bloquant", Type: "bool", Value: true}
+	cultivable := tiledProp{Name: "cultivable", Type: "bool", Value: true}
 	return tiledMap{
 		Type: "map", Version: "1.10", TiledVersion: "1.10.2",
 		Orientation: "orthogonal", RenderOrder: "right-down",
@@ -455,13 +597,19 @@ func buildMap(rng *rand.Rand) tiledMap {
 		Layers: []tiledLayer{
 			{ID: 1, Name: "sol", Type: "tilelayer", Width: mapW, Height: mapH, Data: ground, Opacity: 1, Visible: true},
 			{ID: 2, Name: "ressources", Type: "objectgroup", DrawOrder: "topdown", Objects: objects, Opacity: 1, Visible: true},
-			{ID: 3, Name: "reperes", Type: "objectgroup", DrawOrder: "topdown", Objects: []tiledObject{spawn}, Opacity: 1, Visible: true},
+			{ID: 3, Name: "reperes", Type: "objectgroup", DrawOrder: "topdown", Objects: []tiledObject{spawn, bed}, Opacity: 1, Visible: true},
 		},
 		Tilesets: []tiledTileset{{
 			FirstGID: 1, Name: "terrain", Image: "../tiles/terrain.png",
 			ImageWidth: tile * terrainCount, ImageHeight: tile,
 			TileWidth: tile, TileHeight: tile, TileCount: terrainCount, Columns: terrainCount,
-			Tiles: []tiledTile{{ID: tWater, Properties: []tiledProp{{Name: "bloquant", Type: "bool", Value: true}}}},
+			Tiles: []tiledTile{
+				{ID: tGrass, Properties: []tiledProp{cultivable}},
+				{ID: tGrassFlowers, Properties: []tiledProp{cultivable}},
+				{ID: tWater, Properties: []tiledProp{blocking, {Name: "eau", Type: "bool", Value: true}}},
+				{ID: tTilled, Properties: []tiledProp{cultivable}},
+				{ID: tWall, Properties: []tiledProp{blocking}},
+			},
 		}},
 	}
 }

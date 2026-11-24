@@ -5,11 +5,13 @@ package game
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/cdangeard/lostvalley/server/internal/protocol"
+	"github.com/cdangeard/lostvalley/server/internal/store"
 	"github.com/cdangeard/lostvalley/server/internal/world"
 )
 
@@ -37,42 +39,142 @@ func (c *Client) Done() <-chan struct{} { return c.done }
 
 func (c *Client) kick() { c.closeOnce.Do(func() { close(c.done) }) }
 
+// AutosaveEvery is how often a valley that changed is saved, on top of the
+// saves each morning, when the last player leaves and at shutdown.
+const AutosaveEvery = time.Minute
+
+// Config describes the domain an instance runs.
+type Config struct {
+	DomainID string
+	MapName  string
+	Map      *world.Map
+	Content  *world.Content
+	Store    store.Store
+	Log      *slog.Logger
+	Now      func() time.Time // defaults to time.Now
+}
+
 // Instance runs one domain.
 type Instance struct {
-	MapName string
-	domain  *world.Domain
-	cmds    chan func(time.Time)
-	clients map[*Client]struct{}
-	now     func() time.Time
-	log     *slog.Logger
+	MapName  string
+	domainID string
+	domain   *world.Domain
+	store    store.Store
+	cmds     chan func(time.Time)
+	clients  map[*Client]struct{}
+	now      func() time.Time
+	log      *slog.Logger
+
+	dirty    bool // changed since the last save
+	mornings int  // domain.Mornings() at the last save
+	saves    chan *world.Snapshot
+	saved    chan struct{}
 }
 
-// NewInstance creates an instance for a loaded map. Call Run to start it.
-func NewInstance(mapName string, m *world.Map, log *slog.Logger) *Instance {
-	return &Instance{
-		MapName: mapName,
-		domain:  world.NewDomain(m),
-		cmds:    make(chan func(time.Time), 256),
-		clients: map[*Client]struct{}{},
-		now:     time.Now,
-		log:     log,
+// Open loads the domain from the store (or starts a new one) and returns an
+// instance ready to Run. Time spent while the server was down is caught up
+// at the offline pace on the first tick.
+func Open(ctx context.Context, cfg Config) (*Instance, error) {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
+	in := &Instance{
+		MapName:  cfg.MapName,
+		domainID: cfg.DomainID,
+		domain:   world.NewDomain(cfg.Map, cfg.Content, cfg.Now().UnixNano()),
+		store:    cfg.Store,
+		cmds:     make(chan func(time.Time), 256),
+		clients:  map[*Client]struct{}{},
+		now:      cfg.Now,
+		log:      cfg.Log,
+		saves:    make(chan *world.Snapshot, 1),
+		saved:    make(chan struct{}),
+	}
+	snap, err := cfg.Store.Load(ctx, cfg.DomainID)
+	if err != nil {
+		return nil, fmt.Errorf("open domain %s: %w", cfg.DomainID, err)
+	}
+	if snap != nil {
+		in.domain.Restore(snap)
+		in.log.Info("domain loaded", "domain", cfg.DomainID, "saved_at", snap.SavedAt, "players", len(snap.Players))
+	} else {
+		in.log.Info("new domain", "domain", cfg.DomainID)
+	}
+	return in, nil
 }
 
-// Run processes commands until ctx ends. The tick drives regrowth, which
-// follows wall-clock time so the valley keeps living while nobody plays.
+// Run processes commands until ctx ends, then saves one last time. The tick
+// drives the clock and regrowth, which follow wall-clock time so the valley
+// keeps living while nobody plays.
 func (in *Instance) Run(ctx context.Context, tick time.Duration) {
+	go in.saveLoop()
+	defer func() {
+		in.save(in.now())
+		close(in.saves)
+		<-in.saved
+	}()
 	t := time.NewTicker(tick)
 	defer t.Stop()
+	autosave := time.NewTicker(AutosaveEvery)
+	defer autosave.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case cmd := <-in.cmds:
-			cmd(in.now())
+			now := in.now()
+			cmd(now)
+			in.saveAfterMorning(now)
 		case <-t.C:
-			in.deliver(in.domain.Tick(in.now()))
+			now := in.now()
+			in.deliver(in.domain.Tick(now))
+			in.saveAfterMorning(now)
+		case <-autosave.C:
+			if in.dirty {
+				in.save(in.now())
+			}
 		}
+	}
+}
+
+// saveAfterMorning saves when a day has ended: sleeping saves the game.
+func (in *Instance) saveAfterMorning(now time.Time) {
+	if in.domain.Mornings() != in.mornings {
+		in.save(now)
+	}
+}
+
+// save snapshots the domain and hands it to the save loop, which writes it
+// without holding up the game.
+func (in *Instance) save(now time.Time) {
+	snap, events := in.domain.Snapshot(now)
+	in.deliver(events)
+	in.mornings = in.domain.Mornings()
+	in.dirty = false
+	// Keep only the newest snapshot if the store is slow.
+	select {
+	case in.saves <- snap:
+		return
+	default:
+	}
+	select {
+	case <-in.saves:
+	default:
+	}
+	in.saves <- snap
+}
+
+func (in *Instance) saveLoop() {
+	defer close(in.saved)
+	for snap := range in.saves {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := in.store.Save(ctx, in.domainID, snap)
+		cancel()
+		if err != nil {
+			in.log.Error("save domain", "domain", in.domainID, "err", err)
+			continue
+		}
+		in.log.Debug("domain saved", "domain", in.domainID, "minutes", snap.Domain.Minutes)
 	}
 }
 
@@ -80,9 +182,10 @@ func (in *Instance) do(cmd func(time.Time)) { in.cmds <- cmd }
 
 // Join registers a client and sends it the full state.
 func (in *Instance) Join(c *Client, name string) {
-	in.do(func(time.Time) {
+	in.do(func(now time.Time) {
 		in.clients[c] = struct{}{}
-		events := in.domain.Join(c.PlayerID, name)
+		events := in.domain.Join(c.PlayerID, name, now)
+		in.dirty = true
 		in.sendTo(c, in.domain.Welcome(c.PlayerID, in.MapName))
 		in.deliver(events)
 		in.log.Info("client joined", "player", c.PlayerID, "clients", len(in.clients))
@@ -91,7 +194,7 @@ func (in *Instance) Join(c *Client, name string) {
 
 // Leave unregisters a client. The player goes offline with its last client.
 func (in *Instance) Leave(c *Client) {
-	in.do(func(time.Time) {
+	in.do(func(now time.Time) {
 		if _, ok := in.clients[c]; !ok {
 			return
 		}
@@ -102,8 +205,9 @@ func (in *Instance) Leave(c *Client) {
 				return // another tab still drives this player
 			}
 		}
-		in.deliver(in.domain.Leave(c.PlayerID))
+		in.deliver(in.domain.Leave(c.PlayerID, now))
 		in.log.Info("player left", "player", c.PlayerID)
+		in.save(now)
 	})
 }
 
@@ -118,14 +222,17 @@ func (in *Instance) Handle(c *Client, msg any) {
 		switch m := msg.(type) {
 		case *protocol.Move:
 			seq, res = m.Seq, in.domain.Move(c.PlayerID, m.Dir, now)
-		case *protocol.Gather:
-			seq, res = m.Seq, in.domain.Gather(c.PlayerID, now)
+		case *protocol.Use:
+			seq, res = m.Seq, in.domain.Use(c.PlayerID, m.Item, now)
 		default:
 			in.sendTo(c, protocol.Error{T: protocol.TypeError, Message: "unexpected message"})
 			return
 		}
 		in.sendTo(c, protocol.Ack{T: protocol.TypeAck, Seq: seq, OK: res.OK, Reason: res.Reason})
 		in.deliver(res.Events)
+		if res.OK {
+			in.dirty = true
+		}
 	})
 }
 
