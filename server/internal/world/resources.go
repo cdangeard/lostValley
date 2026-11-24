@@ -28,6 +28,7 @@ type ResourceNode struct {
 	At       Point
 	Hits     int
 	Depleted bool
+	Removed  bool // uprooted for good: the land was cleared
 	RegrowAt time.Time
 }
 

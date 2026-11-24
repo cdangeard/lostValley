@@ -10,7 +10,7 @@ import (
 )
 
 // Version is bumped whenever a message changes shape.
-const Version = 2
+const Version = 3
 
 // Directions a player can face or step in.
 const (
@@ -28,9 +28,13 @@ func ValidDir(d string) bool {
 // ---------- client → server ----------
 
 const (
-	TypeHello = "hello"
-	TypeMove  = "move"
-	TypeUse   = "use"
+	TypeHello     = "hello"
+	TypeMove      = "move"
+	TypeUse       = "use"
+	TypeWait      = "wait"
+	TypeBuild     = "build"
+	TypeDismantle = "dismantle"
+	TypeChestMove = "chest_move"
 )
 
 // Hello is the first message on a connection. PlayerID is a random token the
@@ -60,6 +64,44 @@ type Use struct {
 	Item string `json:"item"`
 }
 
+// Wait spends one combat tick doing nothing. Outside combat it does nothing.
+type Wait struct {
+	T   string `json:"t"`
+	Seq int    `json:"seq"`
+}
+
+// Build places a building whose top-left corner is X, Y. The footprint must
+// cover the tile the player faces, inside the domain.
+type Build struct {
+	T    string `json:"t"`
+	Seq  int    `json:"seq"`
+	Kind string `json:"kind"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+}
+
+// Dismantle takes down the building the player faces and gives back its cost.
+type Dismantle struct {
+	T   string `json:"t"`
+	Seq int    `json:"seq"`
+}
+
+// Chest operations.
+const (
+	ChestPut  = "deposer"
+	ChestTake = "prendre"
+)
+
+// ChestMove moves Count of Item between the bag and the house chest. The
+// player must face the chest. Count <= 0 moves the whole stack.
+type ChestMove struct {
+	T     string `json:"t"`
+	Seq   int    `json:"seq"`
+	Op    string `json:"op"`
+	Item  string `json:"item"`
+	Count int    `json:"count"`
+}
+
 // DecodeClient parses a client message into its concrete type.
 func DecodeClient(raw []byte) (any, error) {
 	var head struct {
@@ -76,6 +118,14 @@ func DecodeClient(raw []byte) (any, error) {
 		msg = &Move{}
 	case TypeUse:
 		msg = &Use{}
+	case TypeWait:
+		msg = &Wait{}
+	case TypeBuild:
+		msg = &Build{}
+	case TypeDismantle:
+		msg = &Dismantle{}
+	case TypeChestMove:
+		msg = &ChestMove{}
 	default:
 		return nil, fmt.Errorf("decode message: unknown type %q", head.T)
 	}
@@ -88,18 +138,26 @@ func DecodeClient(raw []byte) (any, error) {
 // ---------- server → client ----------
 
 const (
-	TypeWelcome    = "welcome"
-	TypePlayer     = "player"
-	TypePlayerLeft = "player_left"
-	TypeResource   = "resource"
-	TypeInventory  = "inventory"
-	TypePlot       = "plot"
-	TypePlots      = "plots"
-	TypeClock      = "clock"
-	TypeStats      = "stats"
-	TypeNotice     = "notice"
-	TypeAck        = "ack"
-	TypeError      = "error"
+	TypeWelcome      = "welcome"
+	TypePlayer       = "player"
+	TypePlayerLeft   = "player_left"
+	TypeResource     = "resource"
+	TypeInventory    = "inventory"
+	TypePlot         = "plot"
+	TypePlots        = "plots"
+	TypeClock        = "clock"
+	TypeStats        = "stats"
+	TypeNotice       = "notice"
+	TypeCreature     = "creature"
+	TypeCreatureGone = "creature_gone"
+	TypeBuilding     = "building"
+	TypeBuildingGone = "building_gone"
+	TypeClaim        = "claim"
+	TypeChest        = "chest"
+	TypeTurn         = "turn"
+	TypeHit          = "hit"
+	TypeAck          = "ack"
+	TypeError        = "error"
 )
 
 // PlayerView is what everyone sees of a player.
@@ -110,6 +168,7 @@ type PlayerView struct {
 	Y        int    `json:"y"`
 	Facing   string `json:"facing"`
 	Sleeping bool   `json:"sleeping,omitempty"`
+	HP       int    `json:"hp"`
 }
 
 // ResourceView is a resource node as clients draw it.
@@ -118,8 +177,9 @@ type ResourceView struct {
 	Kind     string `json:"kind"`
 	X        int    `json:"x"`
 	Y        int    `json:"y"`
-	Hits     int    `json:"hits"`     // strikes left before it is depleted
-	Depleted bool   `json:"depleted"` // a stump, rubble or cut grass, waiting to regrow
+	Hits     int    `json:"hits"`              // strikes left before it is depleted
+	Depleted bool   `json:"depleted"`          // a stump, rubble or cut grass, waiting to regrow
+	Removed  bool   `json:"removed,omitempty"` // uprooted for good: forget it
 }
 
 // Plot states.
@@ -159,12 +219,58 @@ type ClockView struct {
 	MinuteMs  int    `json:"minuteMs"`
 }
 
-// StatsView is what a player sees of their own energy and watering can.
+// StatsView is what a player sees of their own health, energy and watering can.
 type StatsView struct {
+	HP        int `json:"hp"`
+	MaxHP     int `json:"maxHp"`
 	Energy    int `json:"energy"`
 	MaxEnergy int `json:"maxEnergy"`
 	Water     int `json:"water"`
 	WaterMax  int `json:"waterMax"`
+}
+
+// Tile is a tile coordinate.
+type Tile struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// CreatureView is a creature as clients draw it. Warn lists the tiles its
+// next blow will hit: they are shown in red so players can step away.
+type CreatureView struct {
+	ID       int    `json:"id"`
+	Kind     string `json:"kind"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+	Facing   string `json:"facing"`
+	HP       int    `json:"hp"`
+	MaxHP    int    `json:"maxHp"`
+	Armor    int    `json:"armor,omitempty"`
+	Burrowed bool   `json:"burrowed,omitempty"`
+	Stunned  bool   `json:"stunned,omitempty"`
+	Wave     bool   `json:"wave,omitempty"` // came with the night wave, after the crops
+	Warn     []Tile `json:"warn,omitempty"`
+}
+
+// BuildingView is a building; X, Y is its top-left tile.
+type BuildingView struct {
+	ID    int    `json:"id"`
+	Kind  string `json:"kind"`
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	W     int    `json:"w"`
+	H     int    `json:"h"`
+	HP    int    `json:"hp,omitempty"`    // fences
+	Load  int    `json:"load,omitempty"`  // drying rack: crops drying tonight
+	Ready int    `json:"ready,omitempty"` // drying rack: rations to collect
+}
+
+// TurnView tells a player whether they are "au pas" (step-by-step combat)
+// and whether the world is waiting for them.
+type TurnView struct {
+	Engaged bool `json:"engaged"`
+	Ready   bool `json:"ready"` // your move: the world waits for you
+	Tick    int  `json:"tick"`
 }
 
 // Welcome answers Hello with the whole state of the domain.
@@ -180,6 +286,10 @@ type Welcome struct {
 	Tools     []string       `json:"tools"`     // equipped: kept on death
 	Inventory map[string]int `json:"inventory"` // the bag: lost on death
 	Stats     StatsView      `json:"stats"`
+	Creatures []CreatureView `json:"creatures"`
+	Buildings []BuildingView `json:"buildings"`
+	Claim     string         `json:"claim"` // one char per tile, row by row: '1' inside the domain
+	Turn      TurnView       `json:"turn"`
 }
 
 // Player is sent when a player appears, moves, turns, sleeps or wakes.
@@ -233,9 +343,16 @@ type Stats struct {
 
 // Notices tell a player something happened to them.
 const (
-	NoticeMorning = "morning" // a new day after sleeping
-	NoticeFainted = "fainted" // stayed up too late: woke at home with less energy
-	NoticeWaiting = "waiting" // in bed, waiting for the others to go to bed too
+	NoticeMorning  = "morning"   // a new day after sleeping
+	NoticeFainted  = "fainted"   // stayed up too late: woke at home with less energy
+	NoticeWaiting  = "waiting"   // in bed, waiting for the others to go to bed too
+	NoticeKO       = "ko"        // fell in combat: woke at home, the bag is lost
+	NoticeWave     = "wave"      // pests are coming for the fields
+	NoticeWaveOver = "wave_over" // the night's pests ran off at dawn
+	NoticeUprooted = "uprooted"  // a stump came out and the domain grew
+	NoticeWorkshop = "workshop"  // facing the workshop: open the build menu
+	NoticeDried    = "dried"     // rations collected from the drying rack
+	NoticeDrying   = "drying"    // crops hung on the drying rack
 )
 
 // Notice is a short event for one player's screen.
@@ -244,9 +361,76 @@ type Notice struct {
 	Code string `json:"code"`
 }
 
+// Creature is sent when a creature appears, moves, warns, is hit or changes.
+type Creature struct {
+	T        string       `json:"t"`
+	Creature CreatureView `json:"creature"`
+}
+
+// Ways a creature leaves.
+const (
+	GoneKilled = "mort"
+	GoneFled   = "fuite"
+)
+
+// CreatureGone is sent when a creature dies or runs off.
+type CreatureGone struct {
+	T   string `json:"t"`
+	ID  int    `json:"id"`
+	How string `json:"how"`
+}
+
+// Building is sent when a building is placed or changes.
+type Building struct {
+	T        string       `json:"t"`
+	Building BuildingView `json:"building"`
+}
+
+// BuildingGone is sent when a building is taken down or broken.
+type BuildingGone struct {
+	T  string `json:"t"`
+	ID int    `json:"id"`
+}
+
+// Claim is sent when the domain grows.
+type Claim struct {
+	T     string `json:"t"`
+	Claim string `json:"claim"`
+}
+
+// Chest is sent to a player who opens the house chest or moves things in it.
+type Chest struct {
+	T     string         `json:"t"`
+	Items map[string]int `json:"items"`
+	Open  bool           `json:"open,omitempty"` // true when the player just opened it
+}
+
+// Turn is sent to a player when their combat state changes.
+type Turn struct {
+	T    string   `json:"t"`
+	Turn TurnView `json:"turn"`
+}
+
+// Hit targets.
+const (
+	HitPlayer   = "player"
+	HitCreature = "creature"
+	HitBuilding = "building"
+)
+
+// Hit is sent when something takes damage, so clients can show it.
+type Hit struct {
+	T      string `json:"t"`
+	Target string `json:"target"`
+	ID     string `json:"id"` // player ID, or creature/building ID as text
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Amount int    `json:"amount"` // 0: blocked by armour
+}
+
 // Ack answers a Move or Use on the connection that sent it. Reason is a
 // short code when OK is false (blocked, too_fast, nothing_there, wrong_tool,
-// exhausted, empty_can…).
+// exhausted, empty_can, not_your_turn, cannot_build…).
 type Ack struct {
 	T      string `json:"t"`
 	Seq    int    `json:"seq"`

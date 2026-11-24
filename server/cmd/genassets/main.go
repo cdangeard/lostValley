@@ -63,6 +63,23 @@ const (
 	fRipeFeveRonce
 	fWithered
 	fWeeds
+	// Phase 2: creatures of the forest edge.
+	fRodent
+	fRodentMound // burrowed
+	fCrow
+	fBramble
+	fBeetle
+	// Phase 2: buildings, one frame per tile, row by row.
+	fWorkshop // 2 × 2: four frames
+	fWorkshopTR
+	fWorkshopBL
+	fWorkshopBR
+	fWell
+	fRackL // 2 × 1
+	fRackR
+	fScarecrow
+	fFence
+	fChest
 	entityCount
 )
 
@@ -239,7 +256,127 @@ func drawEntities(rng *rand.Rand) image.Image {
 	drawPlayer(c, fPlayerRight, "right")
 	drawPlayer(c, fPlayerUp, "up")
 	drawFarm(c)
+	drawCreatures(c)
+	drawBuildings(c)
 	return c.img
+}
+
+// drawCreatures draws the four creatures of the forest edge.
+func drawCreatures(c canvas) {
+	ink := hex("#1f1a14")
+	// Root rodent: a round brown body with a rootlike tail.
+	c.disc(fRodent, 8, 10, 4.5, hex("#8a6a4a"))
+	c.disc(fRodent, 6.5, 9, 2.5, hex("#a5845e"))
+	c.rect(fRodent, 12, 11, 3, 1, hex("#6b8a3a"))
+	c.px(fRodent, 14, 10, hex("#6b8a3a"))
+	c.px(fRodent, 5, 8, ink)
+	c.px(fRodent, 4, 6, hex("#c9a877"))
+	c.px(fRodent, 7, 6, hex("#c9a877"))
+	// Its mound when it hides underground.
+	c.disc(fRodentMound, 8, 12, 4.5, hex("#6b4529"))
+	c.disc(fRodentMound, 7, 11, 2.5, hex("#8a5f3a"))
+	c.px(fRodentMound, 10, 9, hex("#6b8a3a"))
+	c.px(fRodentMound, 11, 8, hex("#6b8a3a"))
+	// Thieving crow: black with a pale beak, wings spread.
+	c.disc(fCrow, 8, 9, 3.5, hex("#2a2a35"))
+	c.rect(fCrow, 1, 7, 5, 2, hex("#3a3a48"))
+	c.rect(fCrow, 10, 7, 5, 2, hex("#3a3a48"))
+	c.rect(fCrow, 8, 12, 1, 3, hex("#3a3a48"))
+	c.px(fCrow, 7, 8, hex("#f3d27a"))
+	c.rect(fCrow, 8, 10, 2, 1, hex("#d6a24a"))
+	// Bramble: a tangle of thorny stems with two glowing eyes.
+	r := rand.New(rand.NewSource(303))
+	c.disc(fBramble, 8, 9, 6, hex("#3b5a2a"))
+	for i := 0; i < 18; i++ {
+		c.px(fBramble, 2+r.Intn(12), 3+r.Intn(12), []color.RGBA{hex("#5d3a2a"), hex("#6f8f3a"), hex("#c9c0a0")}[r.Intn(3)])
+	}
+	c.px(fBramble, 6, 8, hex("#f0d050"))
+	c.px(fBramble, 10, 8, hex("#f0d050"))
+	// Pebble beetle: a grey shell split down the middle.
+	c.disc(fBeetle, 8, 9, 5.5, hex("#6f727a"))
+	c.disc(fBeetle, 7, 8, 3.5, hex("#8e9199"))
+	c.rect(fBeetle, 8, 4, 1, 10, hex("#4a4c52"))
+	c.rect(fBeetle, 6, 1, 1, 3, ink)
+	c.rect(fBeetle, 10, 1, 1, 3, ink)
+	for _, y := range []int{7, 10, 13} {
+		c.px(fBeetle, 2, y, ink)
+		c.px(fBeetle, 14, y, ink)
+	}
+}
+
+// drawBuildings draws the buildings, one 16 × 16 frame per tile.
+func drawBuildings(c canvas) {
+	wood, woodD, roof, roofD := hex("#9a6a3c"), hex("#6b4a2a"), hex("#a8473a"), hex("#7f3329")
+	stone, stoneD := hex("#8e9199"), hex("#6a6d74")
+
+	// Workshop, 2 × 2: a red roof over a plank front with a wide door.
+	for _, f := range []int{fWorkshop, fWorkshopTR} {
+		c.fill(f, roof)
+		for y := 2; y < tile; y += 4 {
+			c.rect(f, 0, y, tile, 1, roofD)
+		}
+	}
+	c.rect(fWorkshop, 0, 0, 1, tile, roofD)
+	c.rect(fWorkshopTR, 15, 0, 1, tile, roofD)
+	c.rect(fWorkshop, 10, 3, 4, 4, hex("#d9c48e")) // a sign: a saw and a hammer
+	c.rect(fWorkshop, 11, 5, 3, 1, woodD)
+	for _, f := range []int{fWorkshopBL, fWorkshopBR} {
+		c.fill(f, wood)
+		for x := 0; x < tile; x += 4 {
+			c.rect(f, x, 0, 1, tile, woodD)
+		}
+		c.rect(f, 0, 15, tile, 1, woodD)
+	}
+	c.rect(fWorkshopBL, 10, 5, 6, 11, hex("#4a3220"))
+	c.rect(fWorkshopBR, 0, 5, 6, 11, hex("#4a3220"))
+	c.rect(fWorkshopBL, 2, 4, 5, 4, hex("#b9d4f0"))
+	c.rect(fWorkshopBR, 9, 4, 5, 4, hex("#b9d4f0"))
+
+	// Well: a stone ring around dark water, under a little roof.
+	c.disc(fWell, 8, 10, 6, stone)
+	c.disc(fWell, 8, 10, 4, stoneD)
+	c.disc(fWell, 8, 10, 3, hex("#2d5f8f"))
+	c.rect(fWell, 2, 2, 1, 7, woodD)
+	c.rect(fWell, 13, 2, 1, 7, woodD)
+	c.rect(fWell, 1, 1, 14, 2, roof)
+
+	// Drying rack, 2 × 1: two posts and lines with herbs hanging.
+	c.rect(fRackL, 2, 3, 2, 13, woodD)
+	c.rect(fRackR, 12, 3, 2, 13, woodD)
+	for _, f := range []int{fRackL, fRackR} {
+		c.rect(f, 0, 4, tile, 1, hex("#c9bd9a"))
+		c.rect(f, 0, 9, tile, 1, hex("#c9bd9a"))
+	}
+	for _, x := range []int{6, 9, 12} {
+		c.rect(fRackL, x, 5, 1, 3, hex("#7aa846"))
+		c.rect(fRackR, x-4, 10, 1, 3, hex("#c9a646"))
+	}
+
+	// Scarecrow: a straw head, a hat and outstretched arms.
+	c.rect(fScarecrow, 7, 5, 2, 11, woodD)
+	c.rect(fScarecrow, 2, 7, 12, 2, woodD)
+	c.rect(fScarecrow, 5, 7, 6, 5, hex("#4f7a9e"))
+	c.disc(fScarecrow, 8, 4, 2.5, hex("#e3c76a"))
+	c.rect(fScarecrow, 4, 1, 8, 1, hex("#5a3d22"))
+	c.rect(fScarecrow, 6, 0, 4, 1, hex("#5a3d22"))
+	c.rect(fScarecrow, 1, 8, 1, 2, hex("#e3c76a"))
+	c.rect(fScarecrow, 14, 8, 1, 2, hex("#e3c76a"))
+
+	// Fence: two posts and two rails.
+	c.rect(fFence, 1, 3, 3, 12, wood)
+	c.rect(fFence, 12, 3, 3, 12, wood)
+	c.rect(fFence, 0, 6, tile, 2, wood)
+	c.rect(fFence, 0, 11, tile, 2, wood)
+	c.rect(fFence, 1, 3, 3, 1, hex("#c79a62"))
+	c.rect(fFence, 12, 3, 3, 1, hex("#c79a62"))
+
+	// The house chest: a wooden box with iron bands and a lock.
+	c.rect(fChest, 2, 4, 12, 10, wood)
+	c.rect(fChest, 2, 4, 12, 3, hex("#b07a46"))
+	c.rect(fChest, 2, 7, 12, 1, woodD)
+	c.rect(fChest, 4, 4, 1, 10, stoneD)
+	c.rect(fChest, 11, 4, 1, 10, stoneD)
+	c.rect(fChest, 7, 7, 2, 2, hex("#e0b25c"))
 }
 
 // drawFarm draws the bed and everything that grows in a plot.
@@ -435,6 +572,9 @@ const (
 	houseX, houseY, houseW, houseH = 4, 9, 6, 5
 	houseDoorX                     = 7
 	bedX, bedY                     = 5, 10
+	chestX, chestY                 = 8, 10
+	// The domain at the start: 12 × 12 tiles around the house.
+	domainX, domainY, domainW, domainH = 2, 8, 12, 12
 )
 
 func buildMap(rng *rand.Rand) tiledMap {
@@ -580,6 +720,12 @@ func buildMap(rng *rand.Rand) tiledMap {
 	bed := tiledObject{ID: nextID, Name: "lit", Type: "lit",
 		X: bedX * tile, Y: bedY * tile, Width: tile, Height: tile, Visible: true}
 	nextID++
+	chest := tiledObject{ID: nextID, Name: "coffre", Type: "coffre",
+		X: chestX * tile, Y: chestY * tile, Width: tile, Height: tile, Visible: true}
+	nextID++
+	domain := tiledObject{ID: nextID, Name: "domaine", Type: "domaine",
+		X: domainX * tile, Y: domainY * tile, Width: domainW * tile, Height: domainH * tile, Visible: true}
+	nextID++
 
 	blocking := tiledProp{Name: "bloquant", Type: "bool", Value: true}
 	cultivable := tiledProp{Name: "cultivable", Type: "bool", Value: true}
@@ -591,7 +737,7 @@ func buildMap(rng *rand.Rand) tiledMap {
 		Layers: []tiledLayer{
 			{ID: 1, Name: "sol", Type: "tilelayer", Width: mapW, Height: mapH, Data: ground, Opacity: 1, Visible: true},
 			{ID: 2, Name: "ressources", Type: "objectgroup", DrawOrder: "topdown", Objects: objects, Opacity: 1, Visible: true},
-			{ID: 3, Name: "reperes", Type: "objectgroup", DrawOrder: "topdown", Objects: []tiledObject{spawn, bed}, Opacity: 1, Visible: true},
+			{ID: 3, Name: "reperes", Type: "objectgroup", DrawOrder: "topdown", Objects: []tiledObject{spawn, bed, chest, domain}, Opacity: 1, Visible: true},
 		},
 		Tilesets: []tiledTileset{{
 			FirstGID: 1, Name: "terrain", Image: "../tiles/terrain.png",
@@ -600,6 +746,7 @@ func buildMap(rng *rand.Rand) tiledMap {
 			Tiles: []tiledTile{
 				{ID: tGrass, Properties: []tiledProp{cultivable}},
 				{ID: tGrassFlowers, Properties: []tiledProp{cultivable}},
+				{ID: tForestFloor, Properties: []tiledProp{{Name: "lisiere", Type: "bool", Value: true}}},
 				{ID: tWater, Properties: []tiledProp{blocking, {Name: "eau", Type: "bool", Value: true}}},
 				{ID: tTilled, Properties: []tiledProp{cultivable}},
 				{ID: tWall, Properties: []tiledProp{blocking}},

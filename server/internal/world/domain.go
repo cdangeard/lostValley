@@ -49,6 +49,7 @@ const (
 	ReasonEmptyCan    = "empty_can"  // the watering can needs refilling
 	ReasonNoItem      = "no_item"    // the player does not carry that item
 	ReasonAsleep      = "asleep"     // in bed: move to get up first
+	ReasonNotNow      = "not_now"    // e.g. going to bed with a creature close by
 )
 
 // Player is a character in the domain.
@@ -60,14 +61,17 @@ type Player struct {
 	Tools    []string       // equipped: kept on death
 	Bag      map[string]int // lost on death
 	Energy   int
+	HP       int
 	Water    int // in the watering can
 	Online   bool
 	Sleeping bool
 	readyAt  time.Time
+	turnAt   int               // combat tick of this player's next turn while au pas
+	turn     protocol.TurnView // last combat state sent to the player
 }
 
 func (p *Player) view() protocol.PlayerView {
-	return protocol.PlayerView{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Facing: p.Facing, Sleeping: p.Sleeping}
+	return protocol.PlayerView{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Facing: p.Facing, Sleeping: p.Sleeping, HP: p.HP}
 }
 
 func (p *Player) bagCopy() map[string]int {
@@ -113,6 +117,21 @@ type Domain struct {
 	resAt     map[Point]*ResourceNode
 	plots     map[Point]*Plot
 
+	claim          []bool // tiles that belong to the domain: building is allowed there
+	buildings      map[int]*Building
+	bAt            map[Point]*Building
+	nextBuildingID int
+	chest          map[string]int // the house chest, safe from death
+
+	creatures      map[int]*Creature
+	nextCreatureID int
+	ct             int       // combat clock, in ticks
+	rtNext         time.Time // when the combat clock next ticks in real time
+	waitSince      time.Time // when the players au pas started waiting on each other
+	pendingSleep   bool      // someone fell: check whether the night passes
+	lastWaveDay    int
+	populated      bool
+
 	minutes   float64   // game minutes since midnight before day 1
 	weather   string    // today's weather
 	lastTick  time.Time // real time the clock was last advanced to
@@ -126,8 +145,11 @@ func NewDomain(m *Map, c *Content, seed int64) *Domain {
 	d := &Domain{
 		Map: m, content: c, rng: rand.New(rand.NewSource(seed)),
 		players: map[string]*Player{}, resAt: map[Point]*ResourceNode{}, plots: map[Point]*Plot{},
-		minutes: float64(c.Time.WakeHour * 60), weather: protocol.WeatherSun,
+		buildings: map[int]*Building{}, bAt: map[Point]*Building{}, chest: map[string]int{},
+		creatures: map[int]*Creature{},
+		minutes:   float64(c.Time.WakeHour * 60), weather: protocol.WeatherSun,
 	}
+	d.initClaim()
 	for i, s := range m.Resources {
 		if _, taken := d.resAt[s.At]; taken {
 			continue // two objects on one tile: keep the first
@@ -150,7 +172,7 @@ func (d *Domain) Mornings() int { return d.mornings }
 func (d *Domain) newPlayer(id string) *Player {
 	p := &Player{ID: id, Pos: d.Map.Spawn, Facing: protocol.Down,
 		Tools: append([]string(nil), d.content.StarterTools...), Bag: map[string]int{},
-		Energy: d.content.Energy.Max, Water: d.content.WateringCanSize}
+		Energy: d.content.Energy.Max, HP: d.content.Health.Max, Water: d.content.WateringCanSize}
 	for k, v := range d.content.StarterBag {
 		p.Bag[k] = v
 	}
@@ -172,9 +194,19 @@ func (d *Domain) Join(id, name string, now time.Time) []Event {
 	if !d.Walkable(p.Pos) {
 		p.Pos = d.Map.Spawn // the map changed under a saved player
 	}
+	if p.HP <= 0 {
+		p.HP = d.content.Health.Max
+	}
 	p.Online = true
 	p.Sleeping = false
-	return append(events, Event{Msg: protocol.Player{T: protocol.TypePlayer, Player: p.view()}})
+	p.turn = protocol.TurnView{}
+	p.turnAt = d.ct
+	events = append(events, d.playerEvent(p))
+	if !d.populated {
+		d.populated = true
+		events = append(events, d.topUpEdge()...)
+	}
+	return append(events, d.turnEvents()...)
 }
 
 // Leave takes a player offline. Their character stays in the domain.
@@ -184,6 +216,11 @@ func (d *Domain) Leave(id string, now time.Time) []Event {
 		return nil
 	}
 	events := d.advanceClock(now)
+	if d.awake(p) && d.threatened(p) {
+		// Closing the game with a creature at your throat counts as falling.
+		events = append(events, d.knockOut(p)...)
+		d.pendingSleep = false
+	}
 	p.Online = false
 	p.Sleeping = false
 	events = append(events, Event{Msg: protocol.PlayerLeft{T: protocol.TypePlayerLeft, ID: id}})
@@ -197,30 +234,44 @@ func (d *Domain) Leave(id string, now time.Time) []Event {
 func (d *Domain) Welcome(id, mapName string) protocol.Welcome {
 	w := protocol.Welcome{T: protocol.TypeWelcome, Version: protocol.Version, You: id, Map: mapName,
 		Players: []protocol.PlayerView{}, Resources: make([]protocol.ResourceView, 0, len(d.resources)),
-		Plots: d.plotViews(), Clock: d.ClockView(), Tools: []string{}, Inventory: map[string]int{}}
+		Plots: d.plotViews(), Clock: d.ClockView(), Tools: []string{}, Inventory: map[string]int{},
+		Creatures: d.creatureViews(), Buildings: d.buildingViews(), Claim: d.claimString()}
 	for _, p := range d.sortedPlayers() {
 		if p.Online {
 			w.Players = append(w.Players, p.view())
 		}
 	}
 	for _, r := range d.resources {
-		w.Resources = append(w.Resources, resourceView(r))
+		if !r.Removed {
+			w.Resources = append(w.Resources, resourceView(r))
+		}
 	}
 	if p := d.players[id]; p != nil {
 		w.Tools = append(w.Tools, p.Tools...)
 		w.Inventory = p.bagCopy()
 		w.Stats = d.stats(p)
+		w.Turn = d.turnView(p)
 	}
 	return w
 }
 
 func (d *Domain) stats(p *Player) protocol.StatsView {
-	return protocol.StatsView{Energy: p.Energy, MaxEnergy: d.content.Energy.Max, Water: p.Water, WaterMax: d.content.WateringCanSize}
+	return protocol.StatsView{HP: p.HP, MaxHP: d.content.Health.Max, Energy: p.Energy, MaxEnergy: d.content.Energy.Max,
+		Water: p.Water, WaterMax: d.content.WateringCanSize}
 }
 
-// Walkable reports whether a player may stand on p. Plots never block.
+func (d *Domain) statsEvent(p *Player) Event {
+	return Event{To: p.ID, Msg: protocol.Stats{T: protocol.TypeStats, Stats: d.stats(p)}}
+}
+
+func (d *Domain) playerEvent(p *Player) Event {
+	return Event{Msg: protocol.Player{T: protocol.TypePlayer, Player: p.view()}}
+}
+
+// Walkable reports whether a player may stand on p. Plots never block;
+// buildings and creatures do.
 func (d *Domain) Walkable(p Point) bool {
-	if d.Map.Blocked(p) {
+	if d.Map.Blocked(p) || d.bAt[p] != nil || d.creatureAt(p) != nil {
 		return false
 	}
 	if r := d.resAt[p]; r != nil && r.blocks() {
@@ -242,42 +293,82 @@ func (d *Domain) Move(id, dir string, now time.Time) Result {
 	if now.Before(p.readyAt) {
 		return Result{Reason: ReasonTooFast}
 	}
-	changed := p.Facing != dir || p.Sleeping
-	p.Facing = dir
-	p.Sleeping = false
+	if p.Sleeping {
+		// Getting out of bed takes no turn.
+		p.Sleeping = false
+		p.Facing = dir
+		p.readyAt = now.Add(MoveCooldown)
+		p.turnAt = d.ct
+		return Result{OK: true, Events: append([]Event{d.playerEvent(p)}, d.runCombat(now)...)}
+	}
+	if d.engaged(p) && p.turnAt > d.ct {
+		return Result{Reason: ReasonNotYourTurn}
+	}
 	target := p.Pos.Step(dir)
 	if !d.Walkable(target) {
+		// Turning to face something is free, even au pas.
 		res := Result{Reason: ReasonBlocked}
-		if changed {
-			res.Events = []Event{{Msg: protocol.Player{T: protocol.TypePlayer, Player: p.view()}}}
+		if p.Facing != dir {
+			p.Facing = dir
+			res.Events = []Event{d.playerEvent(p)}
 		}
 		return res
 	}
+	p.Facing = dir
 	p.Pos = target
-	p.readyAt = now.Add(MoveCooldown)
-	return Result{OK: true, Events: []Event{{Msg: protocol.Player{T: protocol.TypePlayer, Player: p.view()}}}}
+	return d.afterAction(p, d.content.Combat.MoveTicks, now, MoveCooldown, []Event{d.playerEvent(p)})
 }
 
 // Use acts on the tile in front of the player with item (see protocol.Use).
 func (d *Domain) Use(id, item string, now time.Time) Result {
 	p := d.players[id]
-	if p == nil || !p.Online {
-		return Result{Reason: ReasonNotInDomain}
+	if res, ok := d.ready(p, now); !ok {
+		return res
 	}
-	if p.Sleeping {
-		return Result{Reason: ReasonAsleep}
+	res := d.use(p, item, now)
+	if !res.OK {
+		return res
 	}
-	if now.Before(p.readyAt) {
-		return Result{Reason: ReasonTooFast}
+	ticks := 1
+	if p.hasTool(item) {
+		ticks = d.toolTicks(item)
 	}
+	return d.afterAction(p, ticks, now, UseCooldown, res.Events)
+}
+
+func (d *Domain) use(p *Player, item string, now time.Time) Result {
 	front := p.Pos.Step(p.Facing)
 
-	// Whatever is in hand, the bed and ripe crops answer first.
+	// A weapon swung at a creature fights before anything else.
+	if p.hasTool(item) {
+		if events, hit := d.attack(p, item); hit {
+			return Result{OK: true, Events: events}
+		}
+	}
+	// Food is eaten whatever the player faces, as long as it does some good.
+	if p.Bag[item] > 0 && d.content.Food[item] > 0 && p.HP < d.content.Health.Max {
+		events, reason := d.eatFood(p, item)
+		if reason != "" {
+			return Result{Reason: reason}
+		}
+		return Result{OK: true, Events: events}
+	}
+	// Whatever is in hand, the bed, the chest, buildings and ripe crops answer first.
 	if d.Map.HasBed && front == d.Map.Bed {
+		if d.engaged(p) {
+			return Result{Reason: ReasonNotNow} // no sleeping with a creature around
+		}
 		return d.goToBed(p, now)
 	}
+	if d.Map.HasChest && front == d.Map.Chest {
+		return Result{OK: true, Events: []Event{d.chestEvent(p, true)}}
+	}
+	if b := d.bAt[front]; b != nil {
+		if res, ok := d.useBuilding(p, b, item, now); ok {
+			return res
+		}
+	}
 	if plot := d.plots[front]; plot != nil && d.ripe(plot) {
-		p.readyAt = now.Add(UseCooldown)
 		return Result{OK: true, Events: d.harvest(p, plot)}
 	}
 
@@ -288,6 +379,12 @@ func (d *Domain) Use(id, item string, now time.Time) Result {
 		return d.useTool(p, item, front, now)
 	case p.Bag[item] > 0 && d.content.CropForSeed(item) != "":
 		return d.sow(p, item, front, now)
+	case p.Bag[item] > 0 && d.content.Food[item] > 0:
+		events, reason := d.eatFood(p, item)
+		if reason != "" {
+			return Result{Reason: reason}
+		}
+		return Result{OK: true, Events: events}
 	default:
 		return Result{Reason: ReasonNoItem}
 	}
@@ -308,18 +405,23 @@ func (d *Domain) useTool(p *Player, tool string, front Point, now time.Time) Res
 	cost := d.content.Tools[tool].Energy
 	spend := func() []Event {
 		p.Energy -= cost
-		p.readyAt = now.Add(UseCooldown)
-		return []Event{{To: p.ID, Msg: protocol.Stats{T: protocol.TypeStats, Stats: d.stats(p)}}}
+		return []Event{d.statsEvent(p)}
 	}
 	// Refilling the can is free; everything else needs the energy for it.
 	if tool == "arrosoir" && d.Map.Water(front) {
 		p.Water = d.content.WateringCanSize
-		p.readyAt = now.Add(UseCooldown)
-		return Result{OK: true, Events: []Event{{To: p.ID, Msg: protocol.Stats{T: protocol.TypeStats, Stats: d.stats(p)}}}}
+		return Result{OK: true, Events: []Event{d.statsEvent(p)}}
 	}
 
 	r := d.resAt[front]
 	plot := d.plots[front]
+	if r != nil && r.Depleted && r.Kind == "arbre" && tool == "pioche" {
+		// Digging out a stump with the pickaxe clears the land for good.
+		if p.Energy < cost {
+			return Result{Reason: ReasonExhausted}
+		}
+		return Result{OK: true, Events: append(spend(), d.uproot(p, r)...)}
+	}
 	if r != nil && !r.Depleted {
 		if r.def().Tool != tool {
 			return Result{Reason: ReasonWrongTool}
@@ -377,15 +479,10 @@ func (d *Domain) useTool(p *Player, tool string, front Point, now time.Time) Res
 }
 
 func (d *Domain) canTill(at Point) bool {
-	if !d.Map.Cultivable(at) || d.resAt[at] != nil || d.plots[at] != nil {
+	if !d.Map.Cultivable(at) || d.resAt[at] != nil || d.plots[at] != nil || d.bAt[at] != nil {
 		return false
 	}
-	for _, p := range d.players {
-		if p.Online && p.Pos == at {
-			return false
-		}
-	}
-	return true
+	return !d.occupied(at) && d.creatureAt(at) == nil
 }
 
 func (d *Domain) sow(p *Player, seed string, front Point, now time.Time) Result {
@@ -398,7 +495,6 @@ func (d *Domain) sow(p *Player, seed string, front Point, now time.Time) Result 
 	plot.Crop = d.content.CropForSeed(seed)
 	plot.Growth = 0
 	plot.Neglect = 0
-	p.readyAt = now.Add(UseCooldown)
 	return Result{OK: true, Events: []Event{d.plotEvent(plot), d.bagEvent(p)}}
 }
 
@@ -452,7 +548,7 @@ func (d *Domain) Tick(now time.Time) []Event {
 	events := d.advanceClock(now)
 	for _, r := range d.resources {
 		// A node does not regrow under a player's feet; it waits until the tile is free.
-		if !r.Depleted || now.Before(r.RegrowAt) || d.occupied(r.At) {
+		if !r.Depleted || r.Removed || now.Before(r.RegrowAt) || d.occupied(r.At) || d.creatureAt(r.At) != nil {
 			continue
 		}
 		r.Depleted = false
@@ -463,7 +559,11 @@ func (d *Domain) Tick(now time.Time) []Event {
 		d.clockStep = step
 		events = append(events, d.clockEvent())
 	}
-	return events
+	if wave := d.maybeWave(); len(wave) > 0 {
+		events = append(events, wave...)
+		events = append(events, d.turnEvents()...)
+	}
+	return append(events, d.tickCombat(now)...)
 }
 
 func (d *Domain) halfHour() int { return int(d.minutes / 30) }
@@ -487,5 +587,5 @@ func (d *Domain) sortedPlayers() []*Player {
 }
 
 func resourceView(r *ResourceNode) protocol.ResourceView {
-	return protocol.ResourceView{ID: r.ID, Kind: r.Kind, X: r.At.X, Y: r.At.Y, Hits: r.Hits, Depleted: r.Depleted}
+	return protocol.ResourceView{ID: r.ID, Kind: r.Kind, X: r.At.X, Y: r.At.Y, Hits: r.Hits, Depleted: r.Depleted, Removed: r.Removed}
 }

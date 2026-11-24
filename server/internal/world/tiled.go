@@ -14,9 +14,12 @@ const (
 	LayerMarkers   = "reperes"
 	MarkerSpawn    = "apparition"
 	MarkerBed      = "lit"
+	MarkerChest    = "coffre"  // the house chest: what is in it is never lost
+	MarkerDomain   = "domaine" // a rectangle: the domain at the start, before any clearing
 	PropBlocking   = "bloquant"
 	PropCultivable = "cultivable" // the hoe may till this ground
 	PropWater      = "eau"        // the watering can refills here
+	PropEdge       = "lisiere"    // forest edge: creatures live and the night wave comes from here
 )
 
 // Map is the static part of a domain, loaded from a Tiled JSON export.
@@ -26,11 +29,18 @@ type Map struct {
 	blocked       []bool
 	cultivable    []bool
 	water         []bool
+	edge          []bool
 	Resources     []ResourceSpawn
 	Spawn         Point
 	// Bed is where players sleep; HasBed is false on maps without one.
 	Bed    Point
 	HasBed bool
+	// Chest is the house chest; HasChest is false on maps without one.
+	Chest    Point
+	HasChest bool
+	// Domain is the starting domain; DomainW is 0 when the map has none.
+	Domain           Point
+	DomainW, DomainH int
 }
 
 // ResourceSpawn is where a resource node starts on the map.
@@ -47,7 +57,7 @@ func (m *Map) InBounds(p Point) bool {
 // Blocked reports whether the ground itself stops movement (water, cliffs,
 // walls, the bed…).
 func (m *Map) Blocked(p Point) bool {
-	return !m.InBounds(p) || m.blocked[p.Y*m.Width+p.X] || (m.HasBed && p == m.Bed)
+	return !m.InBounds(p) || m.blocked[p.Y*m.Width+p.X] || (m.HasBed && p == m.Bed) || (m.HasChest && p == m.Chest)
 }
 
 // Cultivable reports whether the hoe may till the ground at p.
@@ -58,6 +68,11 @@ func (m *Map) Cultivable(p Point) bool {
 // Water reports whether p is water the watering can can draw from.
 func (m *Map) Water(p Point) bool {
 	return m.InBounds(p) && m.water[p.Y*m.Width+p.X]
+}
+
+// Edge reports whether p is forest edge, where creatures come from.
+func (m *Map) Edge(p Point) bool {
+	return m.InBounds(p) && m.edge[p.Y*m.Width+p.X]
 }
 
 // WakeSpot is where a player wakes up: in front of the bed, or at the spawn.
@@ -83,11 +98,13 @@ type tiledFile struct {
 		Type    string `json:"type"`
 		Data    []int  `json:"data"`
 		Objects []struct {
-			Name  string  `json:"name"`
-			Type  string  `json:"type"`
-			Class string  `json:"class"` // Tiled >= 1.9 writes "class" instead of "type"
-			X     float64 `json:"x"`
-			Y     float64 `json:"y"`
+			Name   string  `json:"name"`
+			Type   string  `json:"type"`
+			Class  string  `json:"class"` // Tiled >= 1.9 writes "class" instead of "type"
+			X      float64 `json:"x"`
+			Y      float64 `json:"y"`
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
 		} `json:"objects"`
 	} `json:"layers"`
 	Tilesets []struct {
@@ -122,7 +139,7 @@ func ParseMap(raw []byte) (*Map, error) {
 		return nil, fmt.Errorf("parse tiled map: tiles must be square, got %dx%d", f.TileWidth, f.TileHeight)
 	}
 
-	blockingGID, cultivableGID, waterGID := map[int]bool{}, map[int]bool{}, map[int]bool{}
+	blockingGID, cultivableGID, waterGID, edgeGID := map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
 	for _, ts := range f.Tilesets {
 		if ts.Source != "" {
 			return nil, fmt.Errorf("parse tiled map: external tileset %q not supported, embed it in the map", ts.Source)
@@ -139,6 +156,8 @@ func ParseMap(raw []byte) (*Map, error) {
 					cultivableGID[ts.FirstGID+t.ID] = true
 				case PropWater:
 					waterGID[ts.FirstGID+t.ID] = true
+				case PropEdge:
+					edgeGID[ts.FirstGID+t.ID] = true
 				}
 			}
 		}
@@ -146,7 +165,7 @@ func ParseMap(raw []byte) (*Map, error) {
 
 	n := f.Width * f.Height
 	m := &Map{Width: f.Width, Height: f.Height, TileSize: f.TileWidth,
-		blocked: make([]bool, n), cultivable: make([]bool, n), water: make([]bool, n)}
+		blocked: make([]bool, n), cultivable: make([]bool, n), water: make([]bool, n), edge: make([]bool, n)}
 	ts := float64(f.TileWidth)
 	foundGround, foundSpawn := false, false
 	for _, l := range f.Layers {
@@ -161,6 +180,7 @@ func ParseMap(raw []byte) (*Map, error) {
 				m.blocked[i] = blockingGID[gid]
 				m.cultivable[i] = cultivableGID[gid]
 				m.water[i] = waterGID[gid]
+				m.edge[i] = edgeGID[gid]
 			}
 			foundGround = true
 		case l.Name == LayerResources && l.Type == "objectgroup":
@@ -187,6 +207,12 @@ func ParseMap(raw []byte) (*Map, error) {
 				case MarkerBed:
 					m.Bed = Point{int(o.X / ts), int(o.Y / ts)}
 					m.HasBed = true
+				case MarkerChest:
+					m.Chest = Point{int(o.X / ts), int(o.Y / ts)}
+					m.HasChest = true
+				case MarkerDomain:
+					m.Domain = Point{int(o.X / ts), int(o.Y / ts)}
+					m.DomainW, m.DomainH = int(o.Width/ts), int(o.Height/ts)
 				}
 			}
 		}
@@ -202,6 +228,9 @@ func ParseMap(raw []byte) (*Map, error) {
 	}
 	if m.HasBed && (!m.InBounds(m.Bed) || m.Blocked(m.WakeSpot())) {
 		return nil, fmt.Errorf("parse tiled map: the tile below the bed %v must be free", m.Bed)
+	}
+	if m.HasChest && !m.InBounds(m.Chest) {
+		return nil, fmt.Errorf("parse tiled map: chest %v out of bounds", m.Chest)
 	}
 	return m, nil
 }

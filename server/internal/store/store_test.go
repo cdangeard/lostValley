@@ -16,9 +16,13 @@ func sample() *world.Snapshot {
 			Version: world.SnapshotVersion, Minutes: 2000.5, Weather: "pluie",
 			Plots:     []world.PlotState{{X: 3, Y: 4, State: "culture", Crop: "navet", Growth: 2, Watered: true}},
 			Resources: []world.ResourceState{{ID: 7, Kind: "arbre", X: 1, Y: 1, Hits: 0, Depleted: true, RegrowAt: time.Date(2026, 11, 24, 18, 33, 0, 0, time.UTC)}},
+			Buildings: []world.BuildingState{{ID: 2, Kind: "cloture", X: 4, Y: 4, HP: 3, Owner: "ana-123456"}},
+			Claim:     "0110",
+			Chest:     map[string]int{"pierre": 9},
+			WaveDay:   3,
 		},
 		Players: []world.PlayerState{
-			{ID: "ana-123456", Name: "Ana", X: 5, Y: 6, Facing: "up", Tools: []string{"houe"}, Bag: map[string]int{"navet": 3}, Energy: 42, Water: 7},
+			{ID: "ana-123456", Name: "Ana", X: 5, Y: 6, Facing: "up", Tools: []string{"houe"}, Bag: map[string]int{"navet": 3}, Energy: 42, HP: 6, Water: 7},
 			{ID: "bob-123456", Name: "Bob", X: 1, Y: 2, Facing: "down", Tools: []string{}, Bag: map[string]int{}, Energy: 100, Water: 20},
 		},
 	}
@@ -52,7 +56,11 @@ func roundTrip(t *testing.T, s Store) {
 	if len(got.Domain.Resources) != 1 || !got.Domain.Resources[0].RegrowAt.Equal(want.Domain.Resources[0].RegrowAt) {
 		t.Fatalf("resources: %+v", got.Domain.Resources)
 	}
-	if len(got.Players) != 2 || got.Players[0].Energy != 41 || got.Players[0].Bag["navet"] != 3 || got.Players[1].Name != "Bob" {
+	d := got.Domain
+	if len(d.Buildings) != 1 || d.Buildings[0] != want.Domain.Buildings[0] || d.Claim != "0110" || d.Chest["pierre"] != 9 || d.WaveDay != 3 {
+		t.Fatalf("phase 2 state: %+v", d)
+	}
+	if len(got.Players) != 2 || got.Players[0].HP != 6 || got.Players[0].Energy != 41 || got.Players[0].Bag["navet"] != 3 || got.Players[1].Name != "Bob" {
 		t.Fatalf("players: %+v", got.Players)
 	}
 }

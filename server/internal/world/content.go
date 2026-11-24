@@ -25,6 +25,9 @@ type Content struct {
 		Max        int `json:"max"`
 		AfterFaint int `json:"apresEvanouissement"`
 	} `json:"energie"`
+	Health struct {
+		Max int `json:"max"`
+	} `json:"vie"`
 	WateringCanSize int                `json:"arrosoirCapacite"`
 	Tools           map[string]ToolDef `json:"outils"`
 	StarterTools    []string           `json:"outilsDeDepart"`
@@ -34,16 +37,109 @@ type Content struct {
 		SeedChance float64  `json:"chanceGraine"`
 		Seeds      []string `json:"graines"`
 	} `json:"fauchage"`
-	Crops map[string]CropDef `json:"cultures"`
-	Items map[string]string  `json:"objets"`
+	Crops     map[string]CropDef     `json:"cultures"`
+	Food      map[string]int         `json:"nourriture"` // item → health restored when eaten
+	Combat    CombatRules            `json:"combat"`
+	Creatures map[string]CreatureDef `json:"creatures"`
+	Edge      struct {
+		Population int      `json:"population"` // creatures kept at the forest edge
+		Species    []string `json:"especes"`
+	} `json:"lisiere"`
+	Wave      WaveRules              `json:"vague"`
+	Buildings map[string]BuildingDef `json:"batiments"`
+	Domain    struct {
+		UprootRadius int `json:"rayonDessouchage"` // uprooting a stump claims this many tiles around it
+	} `json:"domaine"`
+	Items map[string]string `json:"objets"`
 
 	seedToCrop map[string]string
 }
 
 // ToolDef is one tool the player carries.
 type ToolDef struct {
-	Name   string `json:"nom"`
-	Energy int    `json:"energie"` // energy spent per use
+	Name   string      `json:"nom"`
+	Energy int         `json:"energie"`          // energy spent per use
+	Combat *ToolAttack `json:"combat,omitempty"` // nil: not a weapon
+}
+
+// Attack patterns, relative to the attacker's position and facing.
+const (
+	PatternFront = "devant" // the tile in front
+	PatternArc   = "arc"    // the tile in front and its two neighbours across
+	PatternCross = "croix"  // the four tiles around
+	PatternLine2 = "ligne2" // two tiles straight ahead
+)
+
+// Tool effects in combat.
+const (
+	EffectUnearth = "deterre"  // hits burrowed creatures and brings them up
+	EffectKnock   = "repousse" // pushes the creature back one tile
+	EffectStun    = "etourdit" // the creature loses its next turn
+)
+
+// ToolAttack is what a tool does to a creature.
+type ToolAttack struct {
+	Pattern string `json:"motif"`
+	Damage  int    `json:"degats"`
+	Ticks   int    `json:"ticks"` // combat time the swing takes
+	Effect  string `json:"effet,omitempty"`
+}
+
+// CombatRules tune the step-by-step combat.
+type CombatRules struct {
+	EngageRadius int     `json:"rayonEngagement"`  // a hostile creature this close puts a player "au pas"
+	MoveTicks    int     `json:"ticksDeplacement"` // a player's step costs this many ticks
+	RealTickMs   int     `json:"tickTempsReelMs"`  // with nobody au pas, creatures act at this real pace per tick
+	TurnSeconds  float64 `json:"delaiTourSecondes"`
+	FleeRadius   int     `json:"rayonFuite"` // leaving the game with a creature this close counts as falling
+}
+
+// Creature traits: each one is undone by one tool.
+const (
+	TraitBurrow = "enfoui"   // hides underground between attacks; only the hoe reaches it there
+	TraitFly    = "vol"      // flies over fences and obstacles; scarecrows keep it away
+	TraitBark   = "ecorce"   // armour that the axe breaks for good
+	TraitShell  = "carapace" // armour that the pickaxe goes through
+)
+
+// CreatureDef is one species.
+type CreatureDef struct {
+	Name      string `json:"nom"`
+	HP        int    `json:"pv"`
+	Armor     int    `json:"armure"`
+	MoveTicks int    `json:"ticksDeplacement"`
+	Attack    struct {
+		Pattern string `json:"motif"`
+		Damage  int    `json:"degats"`
+		Windup  int    `json:"preparation"` // ticks between the warning and the blow
+	} `json:"attaque"`
+	Weakness string             `json:"faiblesse"` // this tool deals double and ignores armour
+	Trait    string             `json:"trait"`
+	Loot     map[string]float64 `json:"butin"` // item → count; a fraction is a chance of one
+}
+
+// WaveRules size the night attack on the fields.
+type WaveRules struct {
+	Hour         int      `json:"heure"`
+	Base         int      `json:"base"`
+	PerCrops     int      `json:"parCultures"` // one more creature per this many crops
+	PerDays      int      `json:"parJours"`    // one more creature per this many days
+	Max          int      `json:"max"`
+	EarlySpecies []string `json:"especesDebut"`
+	Species      []string `json:"especes"`
+	EarlyDays    int      `json:"joursAvantGrosses"` // before this day, only EarlySpecies come
+}
+
+// BuildingDef is something a player can build in the domain.
+type BuildingDef struct {
+	Name     string         `json:"nom"`
+	W        int            `json:"largeur"`
+	H        int            `json:"hauteur"`
+	Cost     map[string]int `json:"cout"`
+	Requires string         `json:"requiert,omitempty"` // another building that must stand in the domain
+	HP       int            `json:"pv,omitempty"`       // > 0: creatures can break it
+	Capacity int            `json:"capacite,omitempty"` // drying rack: crops per night
+	Radius   int            `json:"rayon,omitempty"`    // scarecrow: how far crows keep away
 }
 
 // PlotRules says how fast untended plots decay. Counts are in game days.
@@ -125,12 +221,57 @@ func (c *Content) check() error {
 		}
 		c.seedToCrop[crop.Seed] = id
 	}
+	if c.Health.Max <= 0 {
+		return fmt.Errorf("vie.max must be positive")
+	}
+	for name, t := range c.Tools {
+		if a := t.Combat; a != nil && (!validPattern(a.Pattern) || a.Ticks <= 0) {
+			return fmt.Errorf("tool %q: bad combat pattern or ticks", name)
+		}
+	}
+	if c.Combat.EngageRadius <= 0 || c.Combat.MoveTicks <= 0 || c.Combat.RealTickMs <= 0 || c.Combat.TurnSeconds <= 0 {
+		return fmt.Errorf("combat: radius, ticks and delays must be positive")
+	}
+	for id, cr := range c.Creatures {
+		if cr.HP <= 0 || cr.MoveTicks <= 0 || cr.Attack.Windup <= 0 || !validPattern(cr.Attack.Pattern) {
+			return fmt.Errorf("creature %q: needs pv, ticksDeplacement, attaque.preparation and a known motif", id)
+		}
+		if cr.Weakness != "" {
+			if _, ok := c.Tools[cr.Weakness]; !ok {
+				return fmt.Errorf("creature %q is weak to unknown tool %q", id, cr.Weakness)
+			}
+		}
+	}
+	for _, list := range [][]string{c.Edge.Species, c.Wave.Species, c.Wave.EarlySpecies} {
+		for _, sp := range list {
+			if _, ok := c.Creatures[sp]; !ok {
+				return fmt.Errorf("unknown creature %q in lisiere or vague", sp)
+			}
+		}
+	}
+	if len(c.Wave.Species) == 0 || c.Wave.Hour < 0 || c.Wave.Hour > 23 {
+		return fmt.Errorf("vague: needs especes and an hour")
+	}
+	for id, b := range c.Buildings {
+		if b.W <= 0 || b.H <= 0 || len(b.Cost) == 0 {
+			return fmt.Errorf("building %q: needs largeur, hauteur and cout", id)
+		}
+		if b.Requires != "" {
+			if _, ok := c.Buildings[b.Requires]; !ok {
+				return fmt.Errorf("building %q requires unknown building %q", id, b.Requires)
+			}
+		}
+	}
 	for _, s := range c.Mowing.Seeds {
 		if _, ok := c.seedToCrop[s]; !ok {
 			return fmt.Errorf("fauchage gives unknown seed %q", s)
 		}
 	}
 	return nil
+}
+
+func validPattern(p string) bool {
+	return p == PatternFront || p == PatternArc || p == PatternCross || p == PatternLine2
 }
 
 // CropForSeed returns the crop a seed item grows, or "".

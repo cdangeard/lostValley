@@ -10,13 +10,18 @@
     "rattrapageMaxJours": 120
   },
   "energie": { "max": 100, "apresEvanouissement": 50 },
+  "vie": { "max": 10 },
   "arrosoirCapacite": 20,
   "outils": {
-    "houe": { "nom": "Houe", "energie": 2 },
+    "houe": { "nom": "Houe", "energie": 2,
+      "combat": { "motif": "devant", "degats": 1, "ticks": 1, "effet": "deterre" } },
     "arrosoir": { "nom": "Arrosoir", "energie": 1 },
-    "faux": { "nom": "Faux", "energie": 1 },
-    "hache": { "nom": "Hache", "energie": 3 },
-    "pioche": { "nom": "Pioche", "energie": 3 }
+    "faux": { "nom": "Faux", "energie": 1,
+      "combat": { "motif": "arc", "degats": 1, "ticks": 2 } },
+    "hache": { "nom": "Hache", "energie": 3,
+      "combat": { "motif": "devant", "degats": 3, "ticks": 3, "effet": "repousse" } },
+    "pioche": { "nom": "Pioche", "energie": 3,
+      "combat": { "motif": "devant", "degats": 2, "ticks": 2, "effet": "etourdit" } }
   },
   "outilsDeDepart": ["houe", "arrosoir", "faux", "hache", "pioche"],
   "sacDeDepart": { "graine-navet": 12, "graine-ble": 6, "graine-feve": 6 },
@@ -59,12 +64,89 @@
       "recolte": "feve-ronce", "quantite": 2, "chanceGraine": 0.5
     }
   },
+  "nourriture": {
+    "navet": 2, "ble": 1, "feve": 1,
+    "navet-lune": 4, "ble-ambre": 3, "feve-ronce": 3,
+    "ration": 5
+  },
+  "combat": {
+    "rayonEngagement": 5,
+    "ticksDeplacement": 1,
+    "tickTempsReelMs": 500,
+    "delaiTourSecondes": 10,
+    "rayonFuite": 2
+  },
+  "creatures": {
+    "rongeur-racine": {
+      "nom": "Rongeur-racine", "pv": 3, "armure": 0, "ticksDeplacement": 1,
+      "attaque": { "motif": "devant", "degats": 1, "preparation": 1 },
+      "faiblesse": "houe", "trait": "enfoui",
+      "butin": { "fibre": 1, "dent-de-rongeur": 0.5 }
+    },
+    "corbeau-voleur": {
+      "nom": "Corbeau voleur", "pv": 2, "armure": 0, "ticksDeplacement": 1,
+      "attaque": { "motif": "devant", "degats": 1, "preparation": 1 },
+      "faiblesse": "faux", "trait": "vol",
+      "butin": { "plume-noire": 1 }
+    },
+    "ronceau": {
+      "nom": "Ronceau", "pv": 8, "armure": 1, "ticksDeplacement": 2,
+      "attaque": { "motif": "croix", "degats": 2, "preparation": 2 },
+      "faiblesse": "hache", "trait": "ecorce",
+      "butin": { "bois": 2, "epine": 0.6 }
+    },
+    "scarabee-galet": {
+      "nom": "Scarabée-galet", "pv": 6, "armure": 2, "ticksDeplacement": 2,
+      "attaque": { "motif": "ligne2", "degats": 2, "preparation": 2 },
+      "faiblesse": "pioche", "trait": "carapace",
+      "butin": { "pierre": 2, "eclat-de-carapace": 0.6 }
+    }
+  },
+  "lisiere": {
+    "population": 4,
+    "especes": ["rongeur-racine", "ronceau", "scarabee-galet"]
+  },
+  "vague": {
+    "heure": 20,
+    "base": 2, "parCultures": 8, "parJours": 5, "max": 8,
+    "especesDebut": ["rongeur-racine", "corbeau-voleur"],
+    "especes": ["rongeur-racine", "corbeau-voleur", "rongeur-racine", "corbeau-voleur", "ronceau", "scarabee-galet"],
+    "joursAvantGrosses": 3
+  },
+  "batiments": {
+    "atelier": {
+      "nom": "Atelier", "largeur": 2, "hauteur": 2, "cout": { "bois": 20, "pierre": 10 },
+      "description": "Débloque les autres constructions."
+    },
+    "puits": {
+      "nom": "Puits", "largeur": 1, "hauteur": 1, "cout": { "pierre": 12, "bois": 4 }, "requiert": "atelier",
+      "description": "Remplit l'arrosoir sans aller à la rivière."
+    },
+    "sechoir": {
+      "nom": "Séchoir", "largeur": 2, "hauteur": 1, "cout": { "bois": 12, "fibre": 8 }, "requiert": "atelier",
+      "capacite": 6,
+      "description": "Sèche jusqu'à 6 récoltes en rations qui soignent, en une nuit."
+    },
+    "epouvantail": {
+      "nom": "Épouvantail", "largeur": 1, "hauteur": 1, "cout": { "bois": 4, "fibre": 6 }, "requiert": "atelier",
+      "rayon": 3,
+      "description": "Les corbeaux n'approchent pas à moins de 3 cases."
+    },
+    "cloture": {
+      "nom": "Clôture", "largeur": 1, "hauteur": 1, "cout": { "bois": 1 }, "requiert": "atelier", "pv": 4,
+      "description": "Arrête les bêtes qui marchent. Les rongeurs passent dessous, les corbeaux dessus."
+    }
+  },
+  "domaine": { "rayonDessouchage": 2 },
   "objets": {
     "bois": "Bois", "pierre": "Pierre", "fibre": "Fibre",
     "navet": "Navet", "ble": "Blé", "feve": "Fève",
     "navet-lune": "Navet-lune", "ble-ambre": "Blé d'ambre", "feve-ronce": "Fève-ronce",
     "graine-navet": "Graines de navet", "graine-ble": "Graines de blé", "graine-feve": "Graines de fève",
     "graine-navet-lune": "Graines de navet-lune", "graine-ble-ambre": "Graines de blé d'ambre",
-    "graine-feve-ronce": "Graines de fève-ronce"
+    "graine-feve-ronce": "Graines de fève-ronce",
+    "ration": "Ration séchée",
+    "dent-de-rongeur": "Dent de rongeur", "plume-noire": "Plume noire",
+    "epine": "Épine", "eclat-de-carapace": "Éclat de carapace"
   }
 }

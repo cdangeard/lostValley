@@ -11,7 +11,7 @@ import (
 
 // testMap builds a small Tiled map from ASCII art: '.' cultivable grass,
 // '~' water (blocking, refills the can), '#' wall, 'T' tree, 'R' rock,
-// 'h' tall grass, '@' spawn, 'B' bed.
+// 'h' tall grass, '@' spawn, 'B' bed, 'f' forest edge (walkable), 'C' chest.
 func testMap(t *testing.T, rows ...string) *Map {
 	t.Helper()
 	w, h := len(rows[0]), len(rows)
@@ -27,6 +27,8 @@ func testMap(t *testing.T, rows ...string) *Map {
 				gid = "2"
 			case '#':
 				gid = "3"
+			case 'f':
+				gid = "4"
 			}
 			data = append(data, gid)
 			kind := map[rune]string{'T': "arbre", 'R': "rocher", 'h': "herbes"}[c]
@@ -34,8 +36,8 @@ func testMap(t *testing.T, rows ...string) *Map {
 				objects = append(objects, fmt.Sprintf(`{"id":%d,"type":%q,"x":%d,"y":%d}`, id, kind, x*16, y*16))
 				id++
 			}
-			if c == '@' || c == 'B' {
-				name := map[rune]string{'@': "apparition", 'B': "lit"}[c]
+			if c == '@' || c == 'B' || c == 'C' {
+				name := map[rune]string{'@': "apparition", 'B': "lit", 'C': "coffre"}[c]
 				if spawn != "" {
 					spawn += ","
 				}
@@ -54,7 +56,8 @@ func testMap(t *testing.T, rows ...string) *Map {
 	  "tilesets":[{"firstgid":1,"tiles":[
 	    {"id":0,"properties":[{"name":"cultivable","type":"bool","value":true}]},
 	    {"id":1,"properties":[{"name":"bloquant","type":"bool","value":true},{"name":"eau","type":"bool","value":true}]},
-	    {"id":2,"properties":[{"name":"bloquant","type":"bool","value":true}]}]}]
+	    {"id":2,"properties":[{"name":"bloquant","type":"bool","value":true}]},
+	    {"id":3,"properties":[{"name":"lisiere","type":"bool","value":true}]}]}]
 	}`, w, h, strings.Join(data, ","), strings.Join(objects, ","), spawn)
 	m, err := ParseMap([]byte(raw))
 	if err != nil {
@@ -73,6 +76,7 @@ func testContent(t *testing.T) *Content {
 		t.Fatal(err)
 	}
 	c.Time.RainChance = 0
+	c.Edge.Population = 0 // tests place their own creatures
 	return c
 }
 
@@ -216,6 +220,17 @@ func TestGatherTreeYieldsWoodAndLeavesAStump(t *testing.T) {
 	}
 	if d.Walkable(Point{1, 0}) {
 		t.Fatal("a stump should still block")
+	}
+	// The pickaxe digs the stump out for good.
+	if r := d.Use("ana", "pioche", now.Add(2*time.Second)); !r.OK {
+		t.Fatalf("uproot: %+v", r)
+	}
+	if !d.Walkable(Point{1, 0}) || d.Player("ana").Bag["bois"] != ResourceKinds["arbre"].Amount+1 {
+		t.Fatal("an uprooted stump should leave free ground and one more wood")
+	}
+	d.Tick(now.Add(time.Hour))
+	if !d.Walkable(Point{1, 0}) {
+		t.Fatal("an uprooted tree never grows back")
 	}
 }
 
@@ -368,5 +383,27 @@ func TestValleyMapLoads(t *testing.T) {
 		if kinds[k] == 0 {
 			t.Errorf("no %q on the valley map", k)
 		}
+	}
+
+	// Phase 2: a chest in reach, a starting domain around the house, and
+	// forest edge outside it where creatures live and can reach the fields.
+	if !m.HasChest || m.DomainW != 12 || m.DomainH != 12 || !d.Claimed(m.WakeSpot()) {
+		t.Fatal("the valley needs a chest and a 12 × 12 domain around the house")
+	}
+	chestReach := false
+	for _, dir := range []string{protocol.Up, protocol.Down, protocol.Left, protocol.Right} {
+		chestReach = chestReach || seen[m.Chest.Step(dir)]
+	}
+	if !chestReach {
+		t.Fatal("the chest cannot be reached")
+	}
+	edge := 0
+	for p := range seen {
+		if m.Edge(p) && !d.Claimed(p) {
+			edge++
+		}
+	}
+	if edge < 20 {
+		t.Fatalf("only %d reachable forest-edge tiles", edge)
 	}
 }

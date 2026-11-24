@@ -60,6 +60,7 @@ func (d *Domain) plotViews() []protocol.PlotView {
 func (d *Domain) morning(now time.Time, fainted bool) []Event {
 	d.mornings++
 	d.growPlots()
+	d.dryRacks()
 
 	d.weather = protocol.WeatherSun
 	if d.rng.Float64() < d.content.Time.RainChance {
@@ -74,7 +75,14 @@ func (d *Domain) morning(now time.Time, fainted bool) []Event {
 	}
 
 	events := []Event{d.clockEvent(), {Msg: protocol.Plots{T: protocol.TypePlots, Plots: d.plotViews()}}}
+	events = append(events, d.dawn()...)
+	for _, b := range d.sortedBuildings() {
+		if b.Kind == BuildingRack {
+			events = append(events, d.buildingEvent(b))
+		}
+	}
 	for _, p := range d.sortedPlayers() {
+		p.HP = d.content.Health.Max
 		switch {
 		case p.Online && fainted && !p.Sleeping:
 			p.Energy = d.content.Energy.AfterFaint
@@ -88,13 +96,15 @@ func (d *Domain) morning(now time.Time, fainted bool) []Event {
 		}
 		p.Sleeping = false
 		p.readyAt = now
+		p.turnAt = d.ct
 		if p.Online {
 			events = append(events,
 				Event{Msg: protocol.Player{T: protocol.TypePlayer, Player: p.view()}},
 				Event{To: p.ID, Msg: protocol.Stats{T: protocol.TypeStats, Stats: d.stats(p)}})
 		}
 	}
-	return events
+	events = append(events, d.topUpEdge()...)
+	return append(events, d.turnEvents()...)
 }
 
 // wakeAtHome puts a player in front of their bed.
