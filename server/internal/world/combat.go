@@ -42,13 +42,37 @@ type Creature struct {
 	Warn     []Point // tiles the next blow will hit
 	warnDmg  int
 	readyAt  int
+
+	// Taming (see taming.go).
+	Fauna      bool    // wild creature that can be tamed
+	Trust      int     // wild: trust won so far
+	Submissive bool    // a hostile one that gave in: it stops fighting and can be fed
+	Owner      string  // tamed: the player it is bound to
+	Mode       string  // tamed: protocol.ModeFollow or ModeHome
+	Home       int     // tamed: ID of its habitat building, 0 if it has none
+	Resting    bool    // tamed and worn out: home until morning
+	Fed        bool    // tamed: fed since the last morning
+	ateAt      float64 // game minute of its last meal
+}
+
+// hostile reports whether c attacks players and puts them au pas.
+func (d *Domain) hostile(c *Creature) bool {
+	return c.Owner == "" && !c.Submissive && d.cdef(c).Behavior != BehaviorPeaceful
 }
 
 func (d *Domain) cdef(c *Creature) CreatureDef { return d.content.Creatures[c.Kind] }
 
 func (d *Domain) creatureView(c *Creature) protocol.CreatureView {
 	v := protocol.CreatureView{ID: c.ID, Kind: c.Kind, X: c.Pos.X, Y: c.Pos.Y, Facing: c.Facing,
-		HP: c.HP, MaxHP: d.cdef(c).HP, Armor: c.Armor, Burrowed: c.Burrowed, Stunned: c.Stunned, Wave: c.Wave}
+		HP: c.HP, MaxHP: d.creatureMaxHP(c), Armor: c.Armor, Burrowed: c.Burrowed, Stunned: c.Stunned, Wave: c.Wave,
+		Peaceful: d.cdef(c).Behavior == BehaviorPeaceful, Submissive: c.Submissive, Trust: c.Trust,
+		Owner: c.Owner, Mode: c.Mode, Resting: c.Resting}
+	if d.cdef(c).Taming != nil && c.Owner == "" {
+		v.TrustMax = d.content.Taming.MaxTrust
+	}
+	if o := d.players[c.Owner]; o != nil {
+		v.OwnerName = o.Name
+	}
 	for _, t := range c.Warn {
 		v.Warn = append(v.Warn, protocol.Tile{X: t.X, Y: t.Y})
 	}
@@ -126,7 +150,7 @@ func (d *Domain) engaged(p *Player) bool {
 	}
 	r := d.content.Combat.EngageRadius
 	for _, c := range d.creatures {
-		if cheb(c.Pos, p.Pos) <= r {
+		if d.hostile(c) && cheb(c.Pos, p.Pos) <= r {
 			return true
 		}
 	}
@@ -305,6 +329,16 @@ func (d *Domain) act(c *Creature) []Event {
 	if len(c.Warn) > 0 {
 		return d.strikeWarned(c)
 	}
+	if c.Owner != "" {
+		return d.petAct(c)
+	}
+	if !d.hostile(c) {
+		if c.Submissive {
+			c.readyAt = d.ct + 2 // it lies low
+			return nil
+		}
+		return d.wander(c)
+	}
 
 	// Who or what is it after?
 	r := d.content.Combat.EngageRadius
@@ -319,8 +353,15 @@ func (d *Domain) act(c *Creature) []Event {
 			prey, best = p, dist
 		}
 	}
-	if prey != nil {
-		if tiles, dir := d.attackFrom(c, prey.Pos); tiles != nil {
+	preyAt, found := Point{}, prey != nil
+	if found {
+		preyAt = prey.Pos
+	} else if pet := d.petNear(c.Pos, 1); pet != nil {
+		// A tamed creature standing right there gets bitten too.
+		preyAt, found = pet.Pos, true
+	}
+	if found {
+		if tiles, dir := d.attackFrom(c, preyAt); tiles != nil {
 			c.Facing = dir
 			c.Warn = tiles
 			c.warnDmg = def.Attack.Damage
@@ -328,7 +369,7 @@ func (d *Domain) act(c *Creature) []Event {
 			c.readyAt = d.ct + def.Attack.Windup
 			return []Event{d.creatureEvent(c)}
 		}
-		return d.stepToward(c, adjacentGoals(prey.Pos))
+		return d.stepToward(c, adjacentGoals(preyAt))
 	}
 	if c.Wave {
 		if plot := d.nearestCrop(c); plot != nil {
@@ -408,6 +449,9 @@ func (d *Domain) strikeWarned(c *Creature) []Event {
 		if b := d.bAt[t]; b != nil && b.HP > 0 {
 			events = append(events, d.damageBuilding(b, c.warnDmg)...)
 		}
+		if pet := d.creatureAt(t); pet != nil && pet.Owner != "" {
+			events = append(events, d.hurtPet(pet, c.warnDmg)...)
+		}
 	}
 	c.Warn = nil
 	c.Burrowed = d.cdef(c).Trait == TraitBurrow
@@ -415,8 +459,11 @@ func (d *Domain) strikeWarned(c *Creature) []Event {
 	return append(events, d.creatureEvent(c))
 }
 
-// hurt takes health from a player; at zero they fall.
+// hurt takes health from a player; at zero they fall. Esquive may dodge it.
 func (d *Domain) hurt(p *Player, dmg int) []Event {
+	if d.chance(p.mod(ModDodge)) {
+		return []Event{{Msg: protocol.Hit{T: protocol.TypeHit, Target: protocol.HitPlayer, ID: p.ID, X: p.Pos.X, Y: p.Pos.Y, Dodged: true}}}
+	}
 	p.HP -= dmg
 	events := []Event{{Msg: protocol.Hit{T: protocol.TypeHit, Target: protocol.HitPlayer, ID: p.ID, X: p.Pos.X, Y: p.Pos.Y, Amount: dmg}}}
 	if p.HP <= 0 {
@@ -429,7 +476,7 @@ func (d *Domain) hurt(p *Player, dmg int) []Event {
 // everything in it, is gone. Tools stay in hand and the house chest is safe.
 func (d *Domain) knockOut(p *Player) []Event {
 	p.Bag = map[string]int{}
-	p.HP = max(1, d.content.Health.Max/2)
+	p.HP = max(1, d.maxHP(p)/2)
 	d.wakeAtHome(p)
 	p.Sleeping = true
 	d.pendingSleep = true // if everyone is in bed now, the night passes
@@ -514,7 +561,8 @@ func (d *Domain) passable(c *Creature, t Point, ignoreFences bool) bool {
 	trait := d.cdef(c).Trait
 	if trait == TraitFly {
 		// Over trees, water and fences, but not through the walls of a house.
-		return !d.scared(t) && (!d.Map.Blocked(t) || d.Map.Water(t))
+		// Scarecrows keep wild ones away, not tamed ones.
+		return (c.Owner != "" || !d.scared(t)) && (!d.Map.Blocked(t) || d.Map.Water(t))
 	}
 	if d.Map.Blocked(t) {
 		return false
@@ -625,8 +673,11 @@ func (d *Domain) attack(p *Player, tool string) (events []Event, ok bool) {
 	}
 	for _, t := range patternTiles(a.Pattern, p.Pos, p.Facing) {
 		c := d.creatureAt(t)
-		if c == nil || (c.Burrowed && a.Effect != EffectUnearth) {
-			continue
+		if c == nil || c.Owner != "" || (c.Burrowed && a.Effect != EffectUnearth) {
+			continue // tamed creatures are never hit
+		}
+		if !d.hostile(c) && t != p.Pos.Step(p.Facing) {
+			continue // a wide swing does not hurt a calm creature by accident
 		}
 		ok = true
 		events = append(events, d.strikeCreature(p, c, tool, a)...)
@@ -636,7 +687,13 @@ func (d *Domain) attack(p *Player, tool string) (events []Event, ok bool) {
 
 func (d *Domain) strikeCreature(p *Player, c *Creature, tool string, a *ToolAttack) []Event {
 	def := d.cdef(c)
-	dmg, armor := a.Damage, c.Armor
+	dmg, armor := a.Damage+p.mod(modToolDmgStart+toolSuffix(tool)), c.Armor
+	if d.night() {
+		dmg += p.mod(ModNight)
+	}
+	if p.mod(ModPackLeader) > 0 {
+		dmg = 0 // the pack does the biting
+	}
 	if def.Weakness == tool {
 		dmg *= 2
 		armor = 0
@@ -649,8 +706,10 @@ func (d *Domain) strikeCreature(p *Player, c *Creature, tool string, a *ToolAtta
 	events := []Event{{Msg: protocol.Hit{T: protocol.TypeHit, Target: protocol.HitCreature, ID: strconv.Itoa(c.ID), X: c.Pos.X, Y: c.Pos.Y, Amount: dmg}}}
 	if c.HP <= 0 {
 		events = append(events, d.loot(p, def)...)
+		events = append(events, d.gainXP(p, XPCreature)...)
 		return append(events, d.removeCreature(c, protocol.GoneKilled))
 	}
+	events = append(events, d.afterHit(p, c, dmg)...)
 	switch a.Effect {
 	case EffectUnearth:
 		c.Burrowed = false
@@ -691,11 +750,11 @@ func (d *Domain) eatFood(p *Player, item string) ([]Event, string) {
 	if heal <= 0 || p.Bag[item] <= 0 {
 		return nil, ReasonNoItem
 	}
-	if p.HP >= d.content.Health.Max {
+	if p.HP >= d.maxHP(p) {
 		return nil, ReasonFullHealth
 	}
 	p.Bag[item]--
-	p.HP = min(d.content.Health.Max, p.HP+heal)
+	p.HP = min(d.maxHP(p), p.HP+heal)
 	return []Event{d.bagEvent(p), d.statsEvent(p), d.playerEvent(p)}, ""
 }
 
@@ -761,7 +820,7 @@ func (d *Domain) reachable(start Point) map[Point]bool {
 func (d *Domain) topUpEdge() []Event {
 	have := 0
 	for _, c := range d.creatures {
-		if !c.Wave {
+		if !c.Wave && !c.Fauna && c.Owner == "" {
 			have++
 		}
 	}
@@ -840,13 +899,23 @@ func (d *Domain) maybeWave() []Event {
 	return events
 }
 
-// dawn sends the night's pests back to the forest.
+// dawn sends the night's pests, and wild night creatures, back to the forest.
 func (d *Domain) dawn() []Event {
 	var events []Event
 	for _, c := range d.sortedCreatures() {
-		if c.Wave {
+		if c.Owner == "" && d.cdef(c).Nocturnal {
 			events = append(events, d.removeCreature(c, protocol.GoneFled))
 		}
+	}
+	waves := 0
+	for _, c := range d.sortedCreatures() {
+		if c.Wave {
+			events = append(events, d.removeCreature(c, protocol.GoneFled))
+			waves++
+		}
+	}
+	if waves == 0 {
+		return events
 	}
 	if len(events) > 0 {
 		events = append(events, Event{Msg: protocol.Notice{T: protocol.TypeNotice, Code: protocol.NoticeWaveOver}})
@@ -854,10 +923,10 @@ func (d *Domain) dawn() []Event {
 	return events
 }
 
-// threatened reports whether a creature stands within the flee radius of p.
+// threatened reports whether a hostile creature stands within the flee radius of p.
 func (d *Domain) threatened(p *Player) bool {
 	for _, c := range d.creatures {
-		if cheb(c.Pos, p.Pos) <= d.content.Combat.FleeRadius {
+		if d.hostile(c) && cheb(c.Pos, p.Pos) <= d.content.Combat.FleeRadius {
 			return true
 		}
 	}

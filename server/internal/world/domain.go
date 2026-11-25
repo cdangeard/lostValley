@@ -65,6 +65,10 @@ type Player struct {
 	Water    int // in the watering can
 	Online   bool
 	Sleeping bool
+	Level    int             // 1 at the start
+	XP       int             // total experience
+	Talents  map[string]bool // nodes of the constellation taken, besides the heart
+	mods     map[string]int  // what the talents add up to
 	readyAt  time.Time
 	turnAt   int               // combat tick of this player's next turn while au pas
 	turn     protocol.TurnView // last combat state sent to the player
@@ -130,6 +134,7 @@ type Domain struct {
 	waitSince      time.Time // when the players au pas started waiting on each other
 	pendingSleep   bool      // someone fell: check whether the night passes
 	lastWaveDay    int
+	faunaNight     int // last day the night creatures came out
 	populated      bool
 
 	minutes   float64   // game minutes since midnight before day 1
@@ -172,7 +177,8 @@ func (d *Domain) Mornings() int { return d.mornings }
 func (d *Domain) newPlayer(id string) *Player {
 	p := &Player{ID: id, Pos: d.Map.Spawn, Facing: protocol.Down,
 		Tools: append([]string(nil), d.content.StarterTools...), Bag: map[string]int{},
-		Energy: d.content.Energy.Max, HP: d.content.Health.Max, Water: d.content.WateringCanSize}
+		Energy: d.content.Energy.Max, HP: d.content.Health.Max, Water: d.content.WateringCanSize,
+		Level: 1, Talents: map[string]bool{}, mods: map[string]int{}}
 	for k, v := range d.content.StarterBag {
 		p.Bag[k] = v
 	}
@@ -195,7 +201,7 @@ func (d *Domain) Join(id, name string, now time.Time) []Event {
 		p.Pos = d.Map.Spawn // the map changed under a saved player
 	}
 	if p.HP <= 0 {
-		p.HP = d.content.Health.Max
+		p.HP = d.maxHP(p)
 	}
 	p.Online = true
 	p.Sleeping = false
@@ -205,7 +211,9 @@ func (d *Domain) Join(id, name string, now time.Time) []Event {
 	if !d.populated {
 		d.populated = true
 		events = append(events, d.topUpEdge()...)
+		events = append(events, d.topUpFauna()...)
 	}
+	events = append(events, d.petsRejoin(p)...)
 	return append(events, d.turnEvents()...)
 }
 
@@ -251,13 +259,14 @@ func (d *Domain) Welcome(id, mapName string) protocol.Welcome {
 		w.Inventory = p.bagCopy()
 		w.Stats = d.stats(p)
 		w.Turn = d.turnView(p)
+		w.Progress = d.progressView(p)
 	}
 	return w
 }
 
 func (d *Domain) stats(p *Player) protocol.StatsView {
-	return protocol.StatsView{HP: p.HP, MaxHP: d.content.Health.Max, Energy: p.Energy, MaxEnergy: d.content.Energy.Max,
-		Water: p.Water, WaterMax: d.content.WateringCanSize}
+	return protocol.StatsView{HP: p.HP, MaxHP: d.maxHP(p), Energy: p.Energy, MaxEnergy: d.maxEnergy(p),
+		Water: p.Water, WaterMax: d.canSize(p)}
 }
 
 func (d *Domain) statsEvent(p *Player) Event {
@@ -305,6 +314,10 @@ func (d *Domain) Move(id, dir string, now time.Time) Result {
 		return Result{Reason: ReasonNotYourTurn}
 	}
 	target := p.Pos.Step(dir)
+	if pet := d.creatureAt(target); pet != nil && pet.Owner != "" && d.swapWithPet(p, pet) {
+		p.Facing = dir
+		return d.afterAction(p, d.content.Combat.MoveTicks, now, MoveCooldown, []Event{d.playerEvent(p), d.creatureEvent(pet)})
+	}
 	if !d.Walkable(target) {
 		// Turning to face something is free, even au pas.
 		res := Result{Reason: ReasonBlocked}
@@ -345,8 +358,14 @@ func (d *Domain) use(p *Player, item string, now time.Time) Result {
 			return Result{OK: true, Events: events}
 		}
 	}
+	// A creature in front: feed it, or tell a tamed one to follow or stay.
+	if c := d.creatureAt(front); c != nil {
+		if res, ok := d.useOnCreature(p, c, item); ok {
+			return res
+		}
+	}
 	// Food is eaten whatever the player faces, as long as it does some good.
-	if p.Bag[item] > 0 && d.content.Food[item] > 0 && p.HP < d.content.Health.Max {
+	if p.Bag[item] > 0 && d.content.Food[item] > 0 && p.HP < d.maxHP(p) {
 		events, reason := d.eatFood(p, item)
 		if reason != "" {
 			return Result{Reason: reason}
@@ -404,12 +423,14 @@ func (d *Domain) goToBed(p *Player, now time.Time) Result {
 func (d *Domain) useTool(p *Player, tool string, front Point, now time.Time) Result {
 	cost := d.content.Tools[tool].Energy
 	spend := func() []Event {
-		p.Energy -= cost
+		if !d.chance(p.mod(ModSaveEnergy)) {
+			p.Energy -= cost
+		}
 		return []Event{d.statsEvent(p)}
 	}
 	// Refilling the can is free; everything else needs the energy for it.
 	if tool == "arrosoir" && d.Map.Water(front) {
-		p.Water = d.content.WateringCanSize
+		p.Water = d.canSize(p)
 		return Result{OK: true, Events: []Event{d.statsEvent(p)}}
 	}
 
@@ -442,11 +463,15 @@ func (d *Domain) useTool(p *Player, tool string, front Point, now time.Time) Res
 		}
 		np := &Plot{At: front, State: protocol.PlotTilled}
 		d.plots[front] = np
-		return Result{OK: true, Events: append(spend(), d.plotEvent(np))}
+		events := append(spend(), d.plotEvent(np))
+		return Result{OK: true, Events: append(events, d.gainXP(p, XPTill)...)}
 
 	case "arrosoir":
 		if plot == nil || plot.Watered || (plot.State != protocol.PlotTilled && plot.State != protocol.PlotCrop) {
 			return Result{Reason: ReasonNothing}
+		}
+		if p.mod(ModGreenThumb) > 0 {
+			return Result{Reason: ReasonGreenThumb}
 		}
 		if p.Water <= 0 {
 			return Result{Reason: ReasonEmptyCan}
@@ -456,7 +481,8 @@ func (d *Domain) useTool(p *Player, tool string, front Point, now time.Time) Res
 		}
 		p.Water--
 		plot.Watered = true
-		return Result{OK: true, Events: append(spend(), d.plotEvent(plot))}
+		events := append(spend(), d.plotEvent(plot))
+		return Result{OK: true, Events: append(events, d.gainXP(p, XPWater)...)}
 
 	case "faux":
 		if plot == nil || (plot.State != protocol.PlotWild && plot.State != protocol.PlotWithered) {
@@ -495,17 +521,27 @@ func (d *Domain) sow(p *Player, seed string, front Point, now time.Time) Result 
 	plot.Crop = d.content.CropForSeed(seed)
 	plot.Growth = 0
 	plot.Neglect = 0
-	return Result{OK: true, Events: []Event{d.plotEvent(plot), d.bagEvent(p)}}
+	plot.Sower = p.ID
+	plot.DryDays = 0
+	events := []Event{d.plotEvent(plot), d.bagEvent(p)}
+	return Result{OK: true, Events: append(events, d.gainXP(p, XPSow)...)}
 }
 
 func (d *Domain) harvest(p *Player, plot *Plot) []Event {
 	def := d.crop(plot)
-	p.Bag[def.Harvest] += def.Amount
-	if def.SeedChance > 0 && d.rng.Float64() < def.SeedChance {
+	amount := def.Amount
+	if sower := d.players[plot.Sower]; sower != nil && sower.mod(ModGreenThumb) > 0 {
+		amount *= 2 // grown the green-thumb way: twice as big
+	}
+	if d.chance(p.mod(ModYield)) {
+		amount++
+	}
+	p.Bag[def.Harvest] += amount
+	if (def.SeedChance > 0 && d.rng.Float64() < def.SeedChance) || d.chance(p.mod(ModSeedBack)) {
 		p.Bag[def.Seed]++
 	}
-	plot.State, plot.Crop, plot.Growth, plot.Neglect = protocol.PlotTilled, "", 0, 0
-	return []Event{d.plotEvent(plot), d.bagEvent(p)}
+	plot.State, plot.Crop, plot.Growth, plot.Neglect, plot.Sower = protocol.PlotTilled, "", 0, 0, ""
+	return append([]Event{d.plotEvent(plot), d.bagEvent(p)}, d.gainXP(p, XPHarvest)...)
 }
 
 // mowYield is what cutting weeds or tall grass gives: fibre, sometimes a seed.
@@ -514,6 +550,9 @@ func (d *Domain) mowYield(p *Player) []Event {
 	m := d.content.Mowing
 	if len(m.Seeds) > 0 && d.rng.Float64() < m.SeedChance {
 		p.Bag[m.Seeds[d.rng.Intn(len(m.Seeds))]]++
+	}
+	if m.OblivionRate > 0 && d.rng.Float64() < m.OblivionRate {
+		p.Bag[OblivionSeed]++
 	}
 	return []Event{d.bagEvent(p)}
 }
@@ -532,8 +571,12 @@ func (d *Domain) strike(p *Player, r *ResourceNode, now time.Time) []Event {
 			events = append(events, d.mowYield(p)...) // fibre, and sometimes a seed
 		} else {
 			p.Bag[def.Item] += def.Amount
+			if d.chance(p.mod(ModMaterials)) {
+				p.Bag[def.Item]++
+			}
 			events = append(events, d.bagEvent(p))
 		}
+		events = append(events, d.gainXP(p, XPResource)...)
 	}
 	return append(events, Event{Msg: protocol.Resource{T: protocol.TypeResource, Resource: resourceView(r)}})
 }
@@ -559,6 +602,7 @@ func (d *Domain) Tick(now time.Time) []Event {
 		d.clockStep = step
 		events = append(events, d.clockEvent())
 	}
+	events = append(events, d.faunaClock()...)
 	if wave := d.maybeWave(); len(wave) > 0 {
 		events = append(events, wave...)
 		events = append(events, d.turnEvents()...)

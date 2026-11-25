@@ -23,6 +23,7 @@ const (
 	ReasonNeedsPlan   = "needs_plan"   // another building must stand first (the workshop)
 	ReasonCost        = "missing_materials"
 	ReasonBadKind     = "unknown_building"
+	ReasonOccupied    = "occupied" // a tamed creature lives there
 )
 
 // Building is something a player built in the domain.
@@ -189,6 +190,7 @@ func (d *Domain) uproot(p *Player, r *ResourceNode) []Event {
 			}
 		}
 	}
+	events = append(events, d.gainXP(p, XPUproot)...)
 	if grew {
 		events = append(events,
 			Event{Msg: protocol.Claim{T: protocol.TypeClaim, Claim: d.claimString()}},
@@ -215,6 +217,9 @@ func (d *Domain) Build(id, kind string, at Point, now time.Time) Result {
 		return Result{Reason: ReasonNeedsPlan}
 	}
 	b := &Building{Kind: kind, At: at, W: def.W, H: def.H, HP: def.HP, Owner: p.ID}
+	if b.HP > 0 && kind == BuildingFence {
+		b.HP += p.mod(ModFence)
+	}
 	front := p.Pos.Step(p.Facing)
 	covers := false
 	for _, t := range b.tiles() {
@@ -228,17 +233,30 @@ func (d *Domain) Build(id, kind string, at Point, now time.Time) Result {
 	if !covers {
 		return Result{Reason: ReasonCannotBuild}
 	}
-	for item, n := range def.Cost {
+	cost := d.buildCost(p, kind)
+	for item, n := range cost {
 		if p.Bag[item] < n {
 			return Result{Reason: ReasonCost}
 		}
 	}
-	for item, n := range def.Cost {
+	for item, n := range cost {
 		p.Bag[item] -= n
 	}
 	d.addBuilding(b)
 	events := []Event{d.buildingEvent(b), d.bagEvent(p)}
+	events = append(events, d.gainXP(p, XPBuild)...)
 	return d.afterAction(p, d.content.Combat.MoveTicks, now, UseCooldown, events)
+}
+
+// buildCost is what a building costs p: the Charpentier talents take a share
+// off every material (at most half), never below one.
+func (d *Domain) buildCost(p *Player, kind string) map[string]int {
+	off := min(50, p.mod(ModBuildSaving))
+	out := map[string]int{}
+	for item, n := range d.content.Buildings[kind].Cost {
+		out[item] = max(1, n-n*off/100)
+	}
+	return out
 }
 
 // buildable reports whether a building may cover t.
@@ -263,6 +281,9 @@ func (d *Domain) Dismantle(id string, now time.Time) Result {
 		return Result{Reason: ReasonNothing}
 	}
 	def := d.content.Buildings[b.Kind]
+	if d.resident(b) != nil {
+		return Result{Reason: ReasonOccupied}
+	}
 	if b.Kind == BuildingWorkshop {
 		for _, other := range d.buildings {
 			if other != b && d.content.Buildings[other.Kind].Requires == BuildingWorkshop {
@@ -270,10 +291,16 @@ func (d *Domain) Dismantle(id string, now time.Time) Result {
 			}
 		}
 	}
-	for item, n := range def.Cost {
+	refund := def.Cost
+	if owner := d.players[b.Owner]; owner != nil {
+		refund = d.buildCost(owner, b.Kind) // what the builder paid, talents included
+	}
+	for item, n := range refund {
 		p.Bag[item] += n
 	}
-	p.Bag["ration"] += b.Ready
+	if b.Kind == BuildingRack {
+		p.Bag["ration"] += b.Ready
+	}
 	events := []Event{d.removeBuilding(b), d.bagEvent(p)}
 	return d.afterAction(p, d.content.Combat.MoveTicks, now, UseCooldown, events)
 }
@@ -288,11 +315,14 @@ func (d *Domain) useBuilding(p *Player, b *Building, item string, now time.Time)
 		if item != "arrosoir" {
 			return Result{}, false
 		}
-		p.Water = d.content.WateringCanSize
+		p.Water = d.canSize(p)
 		p.readyAt = now.Add(UseCooldown)
 		return Result{OK: true, Events: []Event{d.statsEvent(p)}}, true
 	case BuildingRack:
 		return d.useRack(p, b, now), true
+	}
+	if d.isHabitat(b.Kind) && b.Ready > 0 {
+		return d.collectProduce(p, b), true
 	}
 	return Result{}, false
 }
@@ -317,7 +347,7 @@ func (d *Domain) useRack(p *Player, b *Building, now time.Time) Result {
 	}
 	var stacks []stack
 	for _, c := range d.content.Crops {
-		if c.Wild || p.Bag[c.Harvest] <= 0 {
+		if c.Wild || c.Harvest == c.Seed || p.Bag[c.Harvest] <= 0 {
 			continue
 		}
 		stacks = append(stacks, stack{c.Harvest, p.Bag[c.Harvest]})

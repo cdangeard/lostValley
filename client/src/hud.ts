@@ -1,11 +1,12 @@
 import { formatTime } from './clock';
 import { buildHotbar, buildState, costLabel, itemLabel, type Content, type HotbarSlot } from './content';
 import type { ConnectionState } from './net/Connection';
-import type { ClockView, StatsView, TurnView } from './net/protocol';
+import type { ClockView, ProgressView, StatsView, TurnView } from './net/protocol';
+import { levelProgress } from './talents';
 
 const ITEM_ORDER = [
   'bois', 'pierre', 'fibre', 'navet', 'ble', 'feve', 'navet-lune', 'ble-ambre', 'feve-ronce', 'ration',
-  'dent-de-rongeur', 'plume-noire', 'epine', 'eclat-de-carapace',
+  'lait-de-chevre', 'dent-de-rongeur', 'plume-noire', 'epine', 'eclat-de-carapace',
 ];
 
 /** What the build menu offers besides buildings. */
@@ -22,6 +23,7 @@ export class Hud {
   private readonly turn = document.getElementById('turn')!;
   private readonly buildMenu = document.getElementById('build')!;
   private readonly chestPanel = document.getElementById('chest')!;
+  private readonly level = document.getElementById('level')!;
   private built = new Set<string>();
   private buildChoice = '';
   private chestItems: Record<string, number> = {};
@@ -76,6 +78,15 @@ export class Hud {
       `<span class="label">Arrosoir ${s.water}/${s.waterMax}</span>`;
     this.energy.classList.toggle('low', pct <= 15);
     this.energy.classList.toggle('hurt', hp <= 30);
+  }
+
+  /** Level, experience and talent points waiting to be spent. */
+  setProgress(p: ProgressView): void {
+    const pct = Math.round(100 * levelProgress(p.xp, p.levelXp, p.nextXp));
+    const pts = p.points > 0 ? `<span class="points">${p.points} point${p.points > 1 ? 's' : ''} · T</span>` : '<span class="key">T : talents</span>';
+    this.level.innerHTML =
+      `<span class="label">Niveau ${p.level}</span><span class="bar xp"><span style="width:${pct}%"></span></span>${pts}`;
+    this.level.classList.toggle('ready', p.points > 0);
   }
 
   /** The combat indicator: hidden outside combat. */

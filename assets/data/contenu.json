@@ -1,4 +1,5 @@
 {
+  "constellation": "constellation.json",
   "temps": {
     "jourEnLigneSecondes": 1080,
     "jourHorsLigneSecondes": 3600,
@@ -24,7 +25,7 @@
       "combat": { "motif": "devant", "degats": 2, "ticks": 2, "effet": "etourdit" } }
   },
   "outilsDeDepart": ["houe", "arrosoir", "faux", "hache", "pioche"],
-  "sacDeDepart": { "graine-navet": 12, "graine-ble": 6, "graine-feve": 6 },
+  "sacDeDepart": { "graine-navet": 12, "graine-ble": 6, "graine-feve": 6, "graine-oubli": 1 },
   "parcelles": {
     "joursSansSoinAvantFriche": 4,
     "joursSecsAvantFane": 3,
@@ -33,7 +34,8 @@
   },
   "fauchage": {
     "chanceGraine": 0.15,
-    "graines": ["graine-navet", "graine-ble", "graine-feve"]
+    "graines": ["graine-navet", "graine-ble", "graine-feve"],
+    "chanceOubli": 0.03
   },
   "cultures": {
     "navet": {
@@ -62,12 +64,16 @@
     "feve-ronce": {
       "nom": "Fève-ronce", "graine": "graine-feve-ronce", "jours": 4, "sauvage": true,
       "recolte": "feve-ronce", "quantite": 2, "chanceGraine": 0.5
+    },
+    "pavot-oubli": {
+      "nom": "Pavot d'oubli", "graine": "graine-oubli", "jours": 7,
+      "recolte": "graine-oubli", "quantite": 2
     }
   },
   "nourriture": {
     "navet": 2, "ble": 1, "feve": 1,
     "navet-lune": 4, "ble-ambre": 3, "feve-ronce": 3,
-    "ration": 5
+    "ration": 5, "lait-de-chevre": 4
   },
   "combat": {
     "rayonEngagement": 5,
@@ -100,11 +106,66 @@
       "attaque": { "motif": "ligne2", "degats": 2, "preparation": 2 },
       "faiblesse": "pioche", "trait": "carapace",
       "butin": { "pierre": 2, "eclat-de-carapace": 0.6 }
+    },
+    "chevre-lichen": {
+      "nom": "Chèvre-lichen", "pv": 6, "armure": 0, "ticksDeplacement": 2,
+      "attaque": { "motif": "devant", "degats": 1, "preparation": 2 },
+      "comportement": "paisible",
+      "butin": { "fibre": 2 },
+      "apprivoisement": {
+        "role": "production", "habitat": "enclos",
+        "regime": { "ble": 34, "feve": 20 },
+        "produit": "lait-de-chevre", "stockMax": 3
+      }
+    },
+    "hibou-lanterne": {
+      "nom": "Hibou-lanterne", "pv": 5, "armure": 0, "ticksDeplacement": 1,
+      "attaque": { "motif": "devant", "degats": 1, "preparation": 1 },
+      "trait": "vol", "comportement": "paisible", "nocturne": true,
+      "butin": { "plume-noire": 1 },
+      "apprivoisement": {
+        "role": "compagnon", "habitat": "nichoir",
+        "regime": { "dent-de-rongeur": 34, "feve": 15 }
+      }
+    },
+    "loup-ronce": {
+      "nom": "Loup-ronce", "pv": 9, "armure": 0, "ticksDeplacement": 1,
+      "attaque": { "motif": "devant", "degats": 2, "preparation": 1 },
+      "faiblesse": "hache",
+      "butin": { "epine": 2 },
+      "apprivoisement": {
+        "role": "garde", "habitat": "taniere",
+        "regime": { "ration": 50, "navet": 20, "dent-de-rongeur": 20 },
+        "soumission": 0.34
+      }
     }
   },
   "lisiere": {
     "population": 4,
     "especes": ["rongeur-racine", "ronceau", "scarabee-galet"]
+  },
+  "faune": [
+    { "espece": "chevre-lichen", "nombre": 1 },
+    { "espece": "loup-ronce", "nombre": 1 },
+    { "espece": "hibou-lanterne", "nombre": 1 }
+  ],
+  "apprivoisement": {
+    "confianceMax": 100,
+    "appetitMinutes": 60,
+    "compagnonsDeBase": 1,
+    "rayonCompagnon": 4,
+    "rayonGarde": 6,
+    "heureNuit": 18
+  },
+  "progression": {
+    "xpPremierNiveau": 20,
+    "xpParNiveau": 10,
+    "niveauMax": 100,
+    "coutOubli": 1,
+    "xp": {
+      "recolte": 3, "labour": 1, "semis": 1, "arrosage": 1, "ressource": 2, "dessouchage": 4,
+      "construction": 6, "creature": 5, "nourrir": 2, "apprivoisement": 30, "production": 2
+    }
   },
   "vague": {
     "heure": 20,
@@ -135,6 +196,18 @@
     "cloture": {
       "nom": "Clôture", "largeur": 1, "hauteur": 1, "cout": { "bois": 1 }, "requiert": "atelier", "pv": 4,
       "description": "Arrête les bêtes qui marchent. Les rongeurs passent dessous, les corbeaux dessus."
+    },
+    "enclos": {
+      "nom": "Enclos", "largeur": 2, "hauteur": 2, "cout": { "bois": 12, "fibre": 6 }, "requiert": "atelier",
+      "description": "Abrite une chèvre-lichen apprivoisée. E pour prendre son lait."
+    },
+    "taniere": {
+      "nom": "Tanière", "largeur": 1, "hauteur": 1, "cout": { "pierre": 8, "bois": 4 }, "requiert": "atelier",
+      "description": "Abrite un loup-ronce apprivoisé, qui garde les alentours la nuit."
+    },
+    "nichoir": {
+      "nom": "Nichoir", "largeur": 1, "hauteur": 1, "cout": { "bois": 6, "fibre": 2 }, "requiert": "atelier",
+      "description": "Abrite un hibou-lanterne apprivoisé, qui te suit et éclaire la nuit."
     }
   },
   "domaine": { "rayonDessouchage": 2 },
@@ -147,6 +220,7 @@
     "graine-feve-ronce": "Graines de fève-ronce",
     "ration": "Ration séchée",
     "dent-de-rongeur": "Dent de rongeur", "plume-noire": "Plume noire",
-    "epine": "Épine", "eclat-de-carapace": "Éclat de carapace"
+    "epine": "Épine", "eclat-de-carapace": "Éclat de carapace",
+    "graine-oubli": "Graines d'oubli", "lait-de-chevre": "Lait de chèvre"
   }
 }

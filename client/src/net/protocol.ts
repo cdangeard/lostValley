@@ -1,6 +1,6 @@
 // Mirror of server/internal/protocol/messages.go. Change both together.
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
@@ -18,7 +18,9 @@ export interface Build { t: 'build'; seq: number; kind: string; x: number; y: nu
 export interface Dismantle { t: 'dismantle'; seq: number }
 /** Move items between the bag and the house chest; count <= 0 moves the whole stack. */
 export interface ChestMove { t: 'chest_move'; seq: number; op: 'deposer' | 'prendre'; item: string; count: number }
-export type ClientMessage = Hello | Move | Use | Wait | Build | Dismantle | ChestMove;
+/** Take a node of the constellation (linked to one taken, costs a point), or give it back (costs seeds of oblivion). */
+export interface Talent { t: 'talent'; seq: number; node: string; op: 'prendre' | 'retirer' }
+export type ClientMessage = Hello | Move | Use | Wait | Build | Dismantle | ChestMove | Talent;
 
 // ---------- server → client ----------
 
@@ -81,6 +83,23 @@ export interface CreatureView {
   stunned?: boolean;
   wave?: boolean;
   warn?: Tile[]; // tiles its next blow will hit
+  peaceful?: boolean; // never attacks
+  submissive?: boolean; // gave in: can be fed
+  trust?: number; // wild: trust won so far, up to trustMax
+  trustMax?: number; // set when it can be tamed
+  owner?: string; // tamed: the player it is bound to
+  ownerName?: string;
+  mode?: 'suit' | 'maison';
+  resting?: boolean; // worn out: home until morning
+}
+
+export interface ProgressView {
+  level: number;
+  xp: number; // total
+  levelXp: number; // total at the start of this level
+  nextXp: number; // total for the next level; 0 at the top
+  points: number; // talent points to spend
+  talents: string[]; // nodes taken, besides the heart
 }
 
 export interface BuildingView {
@@ -114,6 +133,7 @@ export interface Welcome {
   buildings: BuildingView[];
   claim: string; // one char per tile, row by row: '1' inside the domain
   turn: TurnView;
+  progress: ProgressView;
 }
 export interface PlayerMsg { t: 'player'; player: PlayerView }
 export interface PlayerLeft { t: 'player_left'; id: string }
@@ -133,8 +153,21 @@ export type NoticeCode =
   | 'uprooted'
   | 'workshop'
   | 'dried'
-  | 'drying';
-export interface NoticeMsg { t: 'notice'; code: NoticeCode }
+  | 'drying'
+  | 'level_up'
+  | 'fed'
+  | 'not_hungry'
+  | 'tamed'
+  | 'needs_habitat'
+  | 'submissive'
+  | 'follow'
+  | 'stay'
+  | 'too_many_followers'
+  | 'pet_tired'
+  | 'produce'
+  | 'scared';
+export interface NoticeMsg { t: 'notice'; code: NoticeCode; arg?: string }
+export interface ProgressMsg { t: 'progress'; progress: ProgressView }
 export interface CreatureMsg { t: 'creature'; creature: CreatureView }
 export interface CreatureGone { t: 'creature_gone'; id: number; how: 'mort' | 'fuite' }
 export interface BuildingMsg { t: 'building'; building: BuildingView }
@@ -142,7 +175,15 @@ export interface BuildingGone { t: 'building_gone'; id: number }
 export interface ClaimMsg { t: 'claim'; claim: string }
 export interface ChestMsg { t: 'chest'; items: Record<string, number>; open?: boolean }
 export interface TurnMsg { t: 'turn'; turn: TurnView }
-export interface HitMsg { t: 'hit'; target: 'player' | 'creature' | 'building'; id: string; x: number; y: number; amount: number }
+export interface HitMsg {
+  t: 'hit';
+  target: 'player' | 'creature' | 'building';
+  id: string;
+  x: number;
+  y: number;
+  amount: number;
+  dodged?: boolean;
+}
 export interface Ack { t: 'ack'; seq: number; ok: boolean; reason?: string }
 export interface ErrorMsg { t: 'error'; message: string }
 
@@ -165,5 +206,6 @@ export type ServerMessage =
   | ChestMsg
   | TurnMsg
   | HitMsg
+  | ProgressMsg
   | Ack
   | ErrorMsg;
