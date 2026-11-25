@@ -5,7 +5,12 @@ export const STEP_MS = 160;
 /** How long a tool swing takes. The server allows one every 250 ms. */
 export const USE_MS = 300;
 
-export type Action = { kind: 'move'; dir: Dir } | { kind: 'use'; item: string };
+export type Action =
+  | { kind: 'move'; dir: Dir }
+  | { kind: 'use'; item: string }
+  | { kind: 'wait' }
+  | { kind: 'build'; building: string; x: number; y: number }
+  | { kind: 'dismantle' };
 
 /**
  * Decides when the player may send the next action. The server is the

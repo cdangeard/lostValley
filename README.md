@@ -3,10 +3,12 @@
 Jeu de ferme et d'aventure en pixel art, jouable dans le navigateur, avec un serveur autoritaire.
 Le concept complet (univers, systèmes, roadmap) est dans le document de concept du projet.
 
-Ce dépôt contient les **phases 0 et 1 du MVP** : une vallée en tuiles de 16 px où l'on se
+Ce dépôt contient les **phases 0 à 2 du MVP** : une vallée en tuiles de 16 px où l'on se
 déplace case par case, coupe, mine et fauche avec ses outils, laboure, sème, arrose et récolte,
-au rythme d'un cycle jour/nuit, et où dormir sauvegarde la partie dans PostgreSQL.
-Le serveur valide chaque action.
+au rythme d'un cycle jour/nuit, et où dormir sauvegarde la partie dans PostgreSQL. Depuis la
+phase 2, on y construit (atelier, puits, séchoir, épouvantail, clôtures), on agrandit le domaine
+en dessouchant, et on se bat **au pas** contre les créatures de la lisière et la vague nocturne
+qui vise les champs. Le serveur valide chaque action.
 
 ## Lancer le jeu en local
 
@@ -34,8 +36,10 @@ Ouvre http://localhost:5173. Deux onglets du même navigateur pilotent **le mêm
 Sans `-db`, le serveur tourne en mémoire et prévient que rien ne sera gardé.
 
 Commandes : flèches, ZQSD ou WASD pour se déplacer ; 1 à 9, la molette ou un clic pour choisir
-un outil ou des graines ; Espace ou E pour l'utiliser sur la case en face. Face à une culture mûre,
-E récolte quel que soit l'objet en main ; face au lit, E va dormir.
+un outil, des graines ou de la nourriture ; Espace ou E pour l'utiliser sur la case en face. Face à
+une culture mûre, E récolte quel que soit l'objet en main ; face au lit, E va dormir ; face au
+coffre, E l'ouvre. B ouvre le menu de construction (1 à 6 pour choisir, E pour poser, Échap pour
+fermer). Au pas, X passe son tour.
 
 ## Ce qu'on peut faire (phase 1)
 
@@ -54,6 +58,34 @@ E récolte quel que soit l'objet en main ; face au lit, E va dormir.
   de son énergie.
 - **Sauvegarde** : chaque matin, quand le dernier joueur part, toutes les minutes si quelque chose
   a changé, et à l'arrêt du serveur.
+
+## Ce qu'on peut faire (phase 2)
+
+- **Construire** (B) : l'**atelier** (2×2) débloque les autres plans : **puits** (remplit
+  l'arrosoir), **séchoir** (2×1 : 6 récoltes deviennent des rations en une nuit), **épouvantail**
+  (les corbeaux restent à 3 cases) et **clôtures** (arrêtent les bêtes qui marchent ; les
+  rongeurs passent dessous, les corbeaux dessus, et une bête bloquée finit par les casser).
+  Un bâtiment se pose sur la case en face, en terrain libre et **dans le domaine** ; les
+  matériaux sortent du sac, et « Démonter » les rend.
+- **Agrandir le domaine** : il commence en 12 × 12 cases autour de la maison (bordure dorée
+  en mode construction). Une souche arrachée à la pioche ne repousse plus, et si elle touche
+  le domaine, il s'étend de 2 cases autour d'elle.
+- **Combat au pas** : dès qu'une créature est à 5 cases, le monde n'avance que quand tu joues.
+  Un pas coûte 1 tick, la houe 1, la faux et la pioche 2, la hache 3 ; chaque créature agit
+  selon sa vitesse. Avant de frapper, elle marque en rouge les cases visées : tu as un tour
+  pour t'écarter ou la frapper. À deux joueurs au pas, celui qui tarde plus de 10 s passe son tour.
+- **Quatre créatures de lisière**, chacune défaite par un outil : le **rongeur-racine** vit
+  sous terre et seule la houe l'atteint ; le **corbeau voleur** vole par-dessus tout et craint
+  la faux (arc de 3 cases) ; le **ronceau** a une écorce que la hache brise pour de bon (et le
+  repousse) ; le **scarabée-galet** a une carapace que la pioche perce (et l'étourdit).
+- **Vague nocturne** : à 20 h, s'il y a des cultures et quelqu'un d'éveillé, des nuisibles
+  sortent de la forêt et mangent les cultures. Plus il y a de champs et de jours, plus ils sont
+  nombreux ; les ronceaux et scarabées s'y joignent à partir du jour 3. À l'aube, ils fuient.
+  Une vallée vide n'est jamais attaquée.
+- **Vie et mort** : 10 points de vie, rendus chaque matin ; manger une récolte ou une ration
+  soigne. Tomber à 0 renvoie au lit, et **le sac et tout son contenu sont perdus** ; les outils
+  et le **coffre de la maison** sont à l'abri. Quitter le jeu avec une créature à 2 cases ou
+  moins compte comme tomber.
 
 Tous ces réglages sont dans `assets/data/contenu.json`, lu par le serveur (règles) et le client
 (noms) : on équilibre sans toucher au code. Le serveur le lit au démarrage (`-content`).
@@ -87,9 +119,10 @@ cd ../server && go run ./cmd/lostvalley -static ../client/dist
 - **Le temps passe hors ligne.** L'horloge de la vallée avance même sans joueur (plus lentement),
   et les ressources repoussent selon l'heure réelle (arbre 3 min, rocher 5 min, herbes 90 s).
 - **Une carte, deux lecteurs.** La carte est un export JSON de [Tiled](https://www.mapeditor.org/).
-  Calques attendus : `sol` (tuiles, propriétés booléennes `bloquant`, `cultivable` et `eau`),
-  `ressources` (objets de type `arbre`, `rocher` ou `herbes`) et `reperes` (objets `apparition`
-  et `lit` ; la case sous le lit doit être libre).
+  Calques attendus : `sol` (tuiles, propriétés booléennes `bloquant`, `cultivable`, `eau` et
+  `lisiere`, d'où viennent les créatures), `ressources` (objets de type `arbre`, `rocher` ou
+  `herbes`) et `reperes` (objets `apparition`, `lit` (la case sous le lit doit être libre),
+  `coffre`, et un rectangle `domaine` : le domaine de départ).
 - **Art original.** Tout l'art actuel est provisoire et dessiné par `genassets`. Une fois la carte
   retouchée dans Tiled, ne relance plus `genassets`, qui l'écraserait.
 
@@ -100,11 +133,16 @@ cd server && go test -race ./...
 cd client && npm test && npm run build
 ```
 
+`TestNightIsTenseButWinnable` joue des nuits entières sur la vraie carte (critère de sortie de
+la phase 2) : un défenseur qui utilise les bons outils doit gagner la plupart des nuits, et un
+champ laissé seul doit être dévoré. `go test -short` le saute.
+
 Le test PostgreSQL ne tourne que si `LV_TEST_DATABASE_URL` pointe vers une base jetable
 (la CI en fournit une).
 
 ## Pas encore là
 
 Saisons qui comptent pour les cultures (le calendrier défile, mais tout pousse en toute saison),
-qualité des récoltes, vente et coffre de la maison, combat au pas et mort (phase 2), comptes et
-visites entre domaines (phase 4), personnalisation du personnage.
+qualité des récoltes, vente, forge et amélioration des outils, arrosoir et fronde au combat,
+apprivoisement et Constellation des Racines (phase 3), comptes, visites et permissions sur les
+bâtiments et le coffre (phase 4), personnalisation du personnage.

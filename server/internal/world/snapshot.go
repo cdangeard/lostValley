@@ -24,6 +24,22 @@ type DomainState struct {
 	Weather   string          `json:"weather"`
 	Plots     []PlotState     `json:"plots"`
 	Resources []ResourceState `json:"resources"`
+	Buildings []BuildingState `json:"buildings,omitempty"`
+	Claim     string          `json:"claim,omitempty"` // '1' per tile of the domain, row by row
+	Chest     map[string]int  `json:"chest,omitempty"`
+	WaveDay   int             `json:"waveDay,omitempty"` // last day the night wave came
+}
+
+// BuildingState is a saved building.
+type BuildingState struct {
+	ID    int    `json:"id"`
+	Kind  string `json:"kind"`
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	HP    int    `json:"hp,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	Load  int    `json:"load,omitempty"`
+	Ready int    `json:"ready,omitempty"`
 }
 
 // PlotState is a saved plot.
@@ -45,6 +61,7 @@ type ResourceState struct {
 	Y        int       `json:"y"`
 	Hits     int       `json:"hits"`
 	Depleted bool      `json:"depleted,omitempty"`
+	Removed  bool      `json:"removed,omitempty"`
 	RegrowAt time.Time `json:"regrowAt,omitempty"`
 }
 
@@ -59,6 +76,7 @@ type PlayerState struct {
 	Tools  []string       `json:"tools"`
 	Bag    map[string]int `json:"bag"`
 	Energy int            `json:"energy"`
+	HP     int            `json:"hp,omitempty"` // 0 in old saves: full health
 	Water  int            `json:"water"`
 }
 
@@ -69,20 +87,30 @@ func (d *Domain) Snapshot(now time.Time) (*Snapshot, []Event) {
 	s := &Snapshot{SavedAt: d.lastTick, Domain: DomainState{
 		Version: SnapshotVersion, Minutes: d.minutes, Weather: d.weather,
 		Plots: []PlotState{}, Resources: []ResourceState{},
+		Claim: d.claimString(), Chest: map[string]int{}, WaveDay: d.lastWaveDay,
 	}}
+	for k, v := range d.chest {
+		if v > 0 {
+			s.Domain.Chest[k] = v
+		}
+	}
+	for _, b := range d.sortedBuildings() {
+		s.Domain.Buildings = append(s.Domain.Buildings, BuildingState{ID: b.ID, Kind: b.Kind, X: b.At.X, Y: b.At.Y,
+			HP: b.HP, Owner: b.Owner, Load: b.Load, Ready: b.Ready})
+	}
 	for _, p := range d.sortedPlots() {
 		s.Domain.Plots = append(s.Domain.Plots, PlotState{X: p.At.X, Y: p.At.Y, State: p.State, Crop: p.Crop,
 			Growth: p.Growth, Watered: p.Watered, Neglect: p.Neglect})
 	}
 	for _, r := range d.resources {
-		if r.Depleted || r.Hits != r.def().Hits {
+		if r.Depleted || r.Removed || r.Hits != r.def().Hits {
 			s.Domain.Resources = append(s.Domain.Resources, ResourceState{ID: r.ID, Kind: r.Kind, X: r.At.X, Y: r.At.Y,
-				Hits: r.Hits, Depleted: r.Depleted, RegrowAt: r.RegrowAt})
+				Hits: r.Hits, Depleted: r.Depleted, Removed: r.Removed, RegrowAt: r.RegrowAt})
 		}
 	}
 	for _, p := range d.sortedPlayers() {
 		s.Players = append(s.Players, PlayerState{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Facing: p.Facing,
-			Tools: append([]string{}, p.Tools...), Bag: p.bagCopy(), Energy: p.Energy, Water: p.Water})
+			Tools: append([]string{}, p.Tools...), Bag: p.bagCopy(), Energy: p.Energy, HP: p.HP, Water: p.Water})
 	}
 	return s, events
 }
@@ -113,6 +141,43 @@ func (d *Domain) Restore(s *Snapshot) {
 			continue // the map changed
 		}
 		r.Hits, r.Depleted, r.RegrowAt = rs.Hits, rs.Depleted, rs.RegrowAt
+		if rs.Removed {
+			r.Removed = true
+			delete(d.resAt, r.At)
+		}
+	}
+	d.restoreClaim(ds.Claim)
+	d.lastWaveDay = ds.WaveDay
+	for k, v := range ds.Chest {
+		if v > 0 {
+			d.chest[k] = v
+		}
+	}
+	for _, bs := range ds.Buildings {
+		def, ok := d.content.Buildings[bs.Kind]
+		if !ok {
+			continue
+		}
+		b := &Building{ID: bs.ID, Kind: bs.Kind, At: Point{bs.X, bs.Y}, W: def.W, H: def.H, HP: bs.HP,
+			Owner: bs.Owner, Load: bs.Load, Ready: bs.Ready}
+		if def.HP > 0 && (b.HP <= 0 || b.HP > def.HP) {
+			b.HP = def.HP
+		}
+		fits := bs.ID > 0
+		for _, t := range b.tiles() {
+			if !d.Map.InBounds(t) || d.Map.Blocked(t) || d.bAt[t] != nil || d.resAt[t] != nil || d.plots[t] != nil {
+				fits = false
+			}
+		}
+		if fits {
+			d.addBuilding(b)
+		}
+	}
+	// Creatures are not saved; drop any spawned where something now stands.
+	for _, c := range d.sortedCreatures() {
+		if d.bAt[c.Pos] != nil || d.Claimed(c.Pos) {
+			delete(d.creatures, c.ID)
+		}
 	}
 	for _, ps := range s.Players {
 		p := d.newPlayer(ps.ID)
@@ -126,6 +191,9 @@ func (d *Domain) Restore(s *Snapshot) {
 			p.Bag[k] = v
 		}
 		p.Energy, p.Water = ps.Energy, ps.Water
+		if ps.HP > 0 {
+			p.HP = min(ps.HP, d.content.Health.Max)
+		}
 		d.players[p.ID] = p
 	}
 }

@@ -10,7 +10,7 @@
  "tileheight": 16,
  "infinite": false,
  "nextlayerid": 4,
- "nextobjectid": 326,
+ "nextobjectid": 328,
  "layers": [
   {
    "id": 1,
@@ -5152,6 +5152,28 @@
      "height": 16,
      "rotation": 0,
      "visible": true
+    },
+    {
+     "id": 326,
+     "name": "coffre",
+     "type": "coffre",
+     "x": 128,
+     "y": 160,
+     "width": 16,
+     "height": 16,
+     "rotation": 0,
+     "visible": true
+    },
+    {
+     "id": 327,
+     "name": "domaine",
+     "type": "domaine",
+     "x": 32,
+     "y": 128,
+     "width": 192,
+     "height": 192,
+     "rotation": 0,
+     "visible": true
     }
    ],
    "draworder": "topdown",
@@ -5190,6 +5212,16 @@
      "properties": [
       {
        "name": "cultivable",
+       "type": "bool",
+       "value": true
+      }
+     ]
+    },
+    {
+     "id": 2,
+     "properties": [
+      {
+       "name": "lisiere",
        "type": "bool",
        "value": true
       }

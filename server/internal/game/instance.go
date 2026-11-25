@@ -224,6 +224,14 @@ func (in *Instance) Handle(c *Client, msg any) {
 			seq, res = m.Seq, in.domain.Move(c.PlayerID, m.Dir, now)
 		case *protocol.Use:
 			seq, res = m.Seq, in.domain.Use(c.PlayerID, m.Item, now)
+		case *protocol.Wait:
+			seq, res = m.Seq, in.domain.Wait(c.PlayerID, now)
+		case *protocol.Build:
+			seq, res = m.Seq, in.domain.Build(c.PlayerID, m.Kind, world.Point{X: m.X, Y: m.Y}, now)
+		case *protocol.Dismantle:
+			seq, res = m.Seq, in.domain.Dismantle(c.PlayerID, now)
+		case *protocol.ChestMove:
+			seq, res = m.Seq, in.domain.ChestMove(c.PlayerID, m.Op, m.Item, m.Count, now)
 		default:
 			in.sendTo(c, protocol.Error{T: protocol.TypeError, Message: "unexpected message"})
 			return

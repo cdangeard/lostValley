@@ -102,3 +102,46 @@ func TestFarmSurvivesLeavingAndRestart(t *testing.T) {
 		t.Fatalf("after restart: plots %+v bag %v tools %v", w.Plots, w.Inventory, w.Tools)
 	}
 }
+
+// Phase 2: build messages reach the domain, its refusals come back in the
+// ack, and the domain (with its claim) is saved.
+func TestBuildMessagesReachTheDomain(t *testing.T) {
+	st := store.NewMemory()
+	ctx, cancel := context.WithCancel(context.Background())
+	in, err := Open(ctx, testConfig(t, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { in.Run(ctx, 20*time.Millisecond); close(done) }()
+
+	c := NewClient("player-bbbb")
+	in.Join(c, "Bob")
+	waitFor(t, c, protocol.TypeWelcome, nil)
+	in.do(func(time.Time) {
+		in.domain.Player("player-bbbb").Bag["bois"] = 30
+		in.domain.Player("player-bbbb").Bag["pierre"] = 10
+	})
+	in.Handle(c, &protocol.Move{T: protocol.TypeMove, Seq: 1, Dir: protocol.Right}) // on tile 1, facing tile 2
+	waitFor(t, c, protocol.TypeAck, nil)
+	time.Sleep(world.MoveCooldown)
+	in.Handle(c, &protocol.Build{T: protocol.TypeBuild, Seq: 2, Kind: "atelier", X: 2, Y: 0})
+	var ack protocol.Ack
+	waitFor(t, c, protocol.TypeAck, &ack)
+	if ack.Reason != world.ReasonCannotBuild {
+		t.Fatalf("a 2×2 workshop does not fit a 1-tile-high map: %+v", ack)
+	}
+	time.Sleep(world.UseCooldown)
+	in.Handle(c, &protocol.Build{T: protocol.TypeBuild, Seq: 3, Kind: "atelier", X: 2, Y: -1})
+	waitFor(t, c, protocol.TypeAck, &ack)
+	if ack.OK {
+		t.Fatal("off the map")
+	}
+	in.Leave(c)
+	cancel()
+	<-done
+	snap, _ := st.Load(context.Background(), "test")
+	if snap == nil || len(snap.Domain.Buildings) != 0 || snap.Domain.Claim == "" {
+		t.Fatalf("saved: %+v", snap)
+	}
+}
