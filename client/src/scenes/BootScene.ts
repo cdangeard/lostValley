@@ -11,6 +11,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image('terrain', 'tiles/terrain.png');
     this.load.spritesheet('entities', 'sprites/entities.png', { frameWidth: 16, frameHeight: 16 });
     this.load.json('contenu', 'data/contenu.json');
+    this.load.json('constellation', 'data/constellation.json');
   }
 
   create(): void {

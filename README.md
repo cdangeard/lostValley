@@ -3,12 +3,14 @@
 Jeu de ferme et d'aventure en pixel art, jouable dans le navigateur, avec un serveur autoritaire.
 Le concept complet (univers, systèmes, roadmap) est dans le document de concept du projet.
 
-Ce dépôt contient les **phases 0 à 2 du MVP** : une vallée en tuiles de 16 px où l'on se
+Ce dépôt contient les **phases 0 à 3 du MVP** : une vallée en tuiles de 16 px où l'on se
 déplace case par case, coupe, mine et fauche avec ses outils, laboure, sème, arrose et récolte,
 au rythme d'un cycle jour/nuit, et où dormir sauvegarde la partie dans PostgreSQL. Depuis la
 phase 2, on y construit (atelier, puits, séchoir, épouvantail, clôtures), on agrandit le domaine
 en dessouchant, et on se bat **au pas** contre les créatures de la lisière et la vague nocturne
-qui vise les champs. Le serveur valide chaque action.
+qui vise les champs. Depuis la phase 3, chaque activité donne de l'expérience, chaque niveau un point
+à placer dans la **Constellation des Racines**, et l'on apprivoise trois créatures de la forêt.
+Le serveur valide chaque action.
 
 ## Lancer le jeu en local
 
@@ -38,8 +40,10 @@ Sans `-db`, le serveur tourne en mémoire et prévient que rien ne sera gardé.
 Commandes : flèches, ZQSD ou WASD pour se déplacer ; 1 à 9, la molette ou un clic pour choisir
 un outil, des graines ou de la nourriture ; Espace ou E pour l'utiliser sur la case en face. Face à
 une culture mûre, E récolte quel que soit l'objet en main ; face au lit, E va dormir ; face au
-coffre, E l'ouvre. B ouvre le menu de construction (1 à 6 pour choisir, E pour poser, Échap pour
-fermer). Au pas, X passe son tour.
+coffre, E l'ouvre. B ouvre le menu de construction (1 à 9 pour choisir, E pour poser, Échap pour
+fermer). Au pas, X passe son tour. T ouvre la Constellation des Racines. Face à une créature, E avec
+sa nourriture en main la nourrit ; face à une de tes créatures, E avec autre chose lui dit de te suivre
+ou de rester à la maison.
 
 ## Ce qu'on peut faire (phase 1)
 
@@ -87,8 +91,34 @@ fermer). Au pas, X passe son tour.
   et le **coffre de la maison** sont à l'abri. Quitter le jeu avec une créature à 2 cases ou
   moins compte comme tomber.
 
+## Ce qu'on peut faire (phase 3)
+
+- **Expérience et niveaux** : récolter, labourer, semer, arroser, couper, dessoucher, construire,
+  combattre, nourrir et apprivoiser donnent de l'expérience. Chaque niveau donne un point de talent.
+- **Constellation des Racines** (T) : 61 nœuds en quatre régions, **Terre** (cultures), **Sylve**
+  (créatures), **Forge** (construction, énergie) et **Lame** (combat), reliées par des ponts. On part
+  du cœur ; un point prend un nœud relié à ce qu'on a déjà. Petits nœuds, nœuds notables nommés, et
+  deux **pierres angulaires** : **Main verte** (l'arrosoir n'arrose plus ; tes semis poussent sans eau
+  un jour sur deux et à chaque pluie, ne fanent jamais et donnent le double) et **Meneur de meute**
+  (tes outils ne blessent plus, tes créatures font trois fois plus de dégâts). Retirer un point coûte
+  une **graine d'oubli** (une au départ, rarement trouvée en fauchant, et le pavot d'oubli en donne).
+  L'écran se zoome à la molette et se déplace en glissant ; clic pour prendre, clic droit pour retirer.
+- **Apprivoisement** : on gagne la confiance en nourrissant (un repas par heure de jeu). La
+  **chèvre-lichen** (blé, fève) est paisible ; le **hibou-lanterne** (dent de rongeur, fève) ne sort que
+  la nuit ; le **loup-ronce** (ration, navet, dent de rongeur) attaque : il faut d'abord l'affaiblir
+  sans le tuer, il se rend sous un tiers de sa vie. Frapper une créature paisible lui fait tout
+  oublier. Confiance pleine, elle s'attache à toi s'il y a un abri libre dans le domaine : **enclos**,
+  **tanière** ou **nichoir** (à construire, B).
+- **Rôles** : la chèvre laisse du **lait** dans son enclos chaque matin après un jour où tu l'as
+  nourrie (E sur l'enclos) ; le loup **garde** sa tanière et attaque tout ce qui approche à 6 cases ;
+  le hibou te **suit**, éclaire la nuit et attaque ce qui t'approche. Une seule créature te suit au
+  départ (la Sylve en ajoute). Tu passes à travers tes créatures, tes coups ne les touchent jamais ;
+  épuisée, une créature rentre se reposer jusqu'au matin. Elles sont sauvegardées avec la vallée.
+
 Tous ces réglages sont dans `assets/data/contenu.json`, lu par le serveur (règles) et le client
-(noms) : on équilibre sans toucher au code. Le serveur le lit au démarrage (`-content`).
+(noms) : on équilibre sans toucher au code. Le serveur le lit au démarrage (`-content`). La
+constellation est dans `assets/data/constellation.json` (nœuds, positions, liens, modificateurs),
+validée par le serveur : chaque nœud doit être relié au cœur et n'utiliser que des modificateurs connus.
 
 Pour servir le client compilé directement depuis le serveur Go :
 
@@ -144,5 +174,7 @@ Le test PostgreSQL ne tourne que si `LV_TEST_DATABASE_URL` pointe vers une base 
 
 Saisons qui comptent pour les cultures (le calendrier défile, mais tout pousse en toute saison),
 qualité des récoltes, vente, forge et amélioration des outils, arrosoir et fronde au combat,
-apprivoisement et Constellation des Racines (phase 3), comptes, visites et permissions sur les
-bâtiments et le coffre (phase 4), personnalisation du personnage.
+bestiaire, humeur et élevage des créatures, montures, créatures qui voyagent avec leur joueur,
+comptes, visites et permissions sur les bâtiments et le coffre (phase 4), personnalisation du
+personnage. La confiance d'une créature sauvage n'est pas sauvegardée (seules les créatures
+apprivoisées le sont).

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { ActionPacer, STEP_MS, type Action } from '../ActionPacer';
 import { LocalClock, cropStage, darkness } from '../clock';
+import { ConstellationPanel } from '../constellationPanel';
 import type { Content } from '../content';
 import { DISMANTLE, Hud } from '../hud';
 import { Connection, playerId, serverUrl } from '../net/Connection';
@@ -10,12 +11,14 @@ import type {
   Dir,
   HitMsg,
   PlayerView,
+  NoticeMsg,
   PlotView,
   ResourceView,
   ServerMessage,
   TurnView,
 } from '../net/protocol';
 import { footprint, footprintTiles } from '../placement';
+import type { Constellation } from '../talents';
 
 const TILE = 16;
 // Must match the names in the Tiled map (see server/internal/world/tiled.go).
@@ -50,6 +53,9 @@ const CREATURE_FRAMES: Record<string, [up: number, burrowed: number]> = {
   'corbeau-voleur': [26, 26],
   ronceau: [27, 27],
   'scarabee-galet': [28, 28],
+  'chevre-lichen': [39, 39],
+  'loup-ronce': [40, 41], // second frame: lying down, subdued
+  'hibou-lanterne': [42, 42],
 };
 /** One frame per tile of the footprint, row by row. */
 const BUILDING_FRAMES: Record<string, number[]> = {
@@ -58,6 +64,9 @@ const BUILDING_FRAMES: Record<string, number[]> = {
   sechoir: [34, 35],
   epouvantail: [36],
   cloture: [37],
+  enclos: [43, 44, 45, 46],
+  taniere: [47],
+  nichoir: [48],
 };
 const F_CHEST = 38;
 
@@ -74,6 +83,12 @@ const REASONS: Record<string, string> = {
   missing_materials: 'Il manque des matériaux dans le sac.',
   full_health: 'Tu es déjà en pleine forme.',
   not_now: 'Pas question de dormir avec une bête dans les parages !',
+  no_point: 'Pas de point de talent : il faut un niveau de plus.',
+  not_linked: 'Ce nœud doit toucher un nœud déjà pris.',
+  not_leaf: "D'autres nœuds en dépendent : retire-les d'abord.",
+  no_oblivion: "Il faut une graine d'oubli pour retirer un point.",
+  green_thumb: "Main verte : ton arrosoir n'arrose plus, tes semis se débrouillent.",
+  occupied: 'Une créature y vit : on ne démonte pas sa maison.',
 };
 const NOTICES: Record<string, string> = {
   morning: 'Une nouvelle journée commence. Partie sauvegardée.',
@@ -98,6 +113,13 @@ interface CreatureSprite {
   sprite: Phaser.GameObjects.Sprite;
   bar: Phaser.GameObjects.Graphics;
   warn: Phaser.GameObjects.Rectangle[];
+  tag: Phaser.GameObjects.Image; // a little heart over a tamed creature
+  glow?: Phaser.GameObjects.Image; // the owl's lantern at night
+}
+
+/** A creature that attacks: tamed, peaceful and subdued ones do not. */
+function hostile(v: CreatureView): boolean {
+  return !v.owner && !v.peaceful && !v.submissive;
 }
 
 interface BuildingSprite {
@@ -116,6 +138,7 @@ interface PlotSprite {
 export class ValleyScene extends Phaser.Scene {
   private conn!: Connection;
   private hud!: Hud;
+  private talents!: ConstellationPanel;
   private me = '';
   private players = new Map<string, PlayerSprite>();
   private resources = new Map<number, { view: ResourceView; sprite: Phaser.GameObjects.Sprite }>();
@@ -206,7 +229,8 @@ export class ValleyScene extends Phaser.Scene {
       use: [k(K.SPACE), k(K.E)],
       wait: [k(K.X)],
     };
-    k(K.B).on('down', () => this.toggleBuild());
+    k(K.B).on('down', () => !this.talents.open && this.toggleBuild());
+    k(K.T).on('down', () => this.toggleTalents());
     k(K.ESC).on('down', () => this.closePanels());
     // 1–9 pick a hotbar slot; AZERTY rows send the same key codes.
     const digits = [K.ONE, K.TWO, K.THREE, K.FOUR, K.FIVE, K.SIX, K.SEVEN, K.EIGHT, K.NINE];
@@ -215,18 +239,28 @@ export class ValleyScene extends Phaser.Scene {
     [digits, numpad].forEach((codes) =>
       codes.forEach((code, i) =>
         k(code).on('down', () => {
+          if (this.talents.open) return;
           if (this.hud.buildOpen) this.pickBuilding(this.hud.buildKinds[i]);
           else this.pick(i);
         }),
       ),
     );
-    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.cycle(dy > 0 ? 1 : -1));
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      if (!this.talents.open) this.cycle(dy > 0 ? 1 : -1);
+    });
+    this.makeGlowTexture();
 
     this.hud = new Hud(
       this.cache.json.get('contenu') as Content,
       (i) => this.pick(i),
       (kind) => this.pickBuilding(kind),
       (op, item) => this.conn.send({ t: 'chest_move', seq: 0, op, item, count: 0 }),
+    );
+    this.talents = new ConstellationPanel(
+      this.cache.json.get('constellation') as Constellation,
+      (node) => this.conn.send({ t: 'talent', seq: 0, node, op: 'prendre' }),
+      (node) => this.conn.send({ t: 'talent', seq: 0, node, op: 'retirer' }),
+      () => this.toggleTalents(),
     );
     this.conn = new Connection({
       url: serverUrl(),
@@ -270,11 +304,13 @@ export class ValleyScene extends Phaser.Scene {
     this.updateFacingMarker();
     this.updateGhost();
     this.updateSky();
+    this.updateGlows();
   }
 
   private wantedAction(): Action | null {
     // Au pas, nothing goes out until the world waits for us.
     if (this.turn.engaged && !this.turn.ready) return null;
+    if (this.talents.open) return null;
     const down = (keys: Phaser.Input.Keyboard.Key[]) => keys.some((key) => key.isDown);
     for (const dir of ['up', 'down', 'left', 'right'] as const) {
       if (down(this.keys[dir])) {
@@ -321,7 +357,15 @@ export class ValleyScene extends Phaser.Scene {
     this.claimLayer.setVisible(true);
   }
 
+  private toggleTalents(): void {
+    const open = !this.talents.open;
+    this.closePanels();
+    this.talents.show(open);
+    if (open) this.pacer.reset();
+  }
+
   private closePanels(): void {
+    this.talents?.show(false);
     this.building = '';
     this.hud.showBuild(false, '');
     this.hud.showChest(false);
@@ -440,7 +484,11 @@ export class ValleyScene extends Phaser.Scene {
         this.claim = msg.claim;
         this.drawClaim();
         this.setTurn(msg.turn);
+        this.setProgress(msg.progress);
         this.keepSelection();
+        break;
+      case 'progress':
+        this.setProgress(msg.progress);
         break;
       case 'player':
         this.upsertPlayer(msg.player);
@@ -472,8 +520,9 @@ export class ValleyScene extends Phaser.Scene {
           if (!this.hud.buildOpen) this.toggleBuild();
           break;
         }
-        this.hud.say(NOTICES[msg.code] ?? msg.code, ['fainted', 'ko', 'wave'].includes(msg.code) ? 4500 : 2600);
+        this.hud.say(this.noticeText(msg), ['fainted', 'ko', 'wave', 'tamed', 'level_up'].includes(msg.code) ? 4500 : 2600);
         if (msg.code === 'ko') this.cameras.main.flash(600, 120, 20, 20);
+        if (msg.code === 'level_up' || msg.code === 'tamed') this.cameras.main.flash(400, 90, 80, 30);
         break;
       case 'creature':
         this.upsertCreature(msg.creature);
@@ -530,6 +579,46 @@ export class ValleyScene extends Phaser.Scene {
     [...this.buildings.keys()].forEach((id) => this.removeBuilding(id));
   }
 
+  private setProgress(p: { level: number; xp: number; levelXp: number; nextXp: number; points: number; talents: string[] } | undefined): void {
+    if (!p) return;
+    this.hud.setProgress(p);
+    this.talents.setProgress(p);
+  }
+
+  private noticeText(msg: NoticeMsg): string {
+    const creature = this.content.creatures[msg.arg ?? '']?.nom ?? 'La créature';
+    const lower = creature.toLowerCase();
+    switch (msg.code) {
+      case 'level_up':
+        return `Niveau ${msg.arg} ! Un point de talent à placer (T).`;
+      case 'fed':
+        return `${creature} mange dans ta main. Sa confiance grandit.`;
+      case 'not_hungry':
+        return `${creature} n'a plus faim pour l'instant. Reviens dans une heure.`;
+      case 'tamed':
+        return `${creature} t'a adopté ! E face à elle : te suivre ou rester.`;
+      case 'needs_habitat': {
+        const b = this.content.batiments[msg.arg ?? '']?.nom ?? msg.arg;
+        return `Elle te fait confiance, mais il lui faut un abri libre dans le domaine : ${b}.`;
+      }
+      case 'submissive':
+        return `${creature} se rend. Nourris-la maintenant, sans la frapper.`;
+      case 'follow':
+        return `${creature} te suit.`;
+      case 'stay':
+        return `${creature} reste à la maison.`;
+      case 'too_many_followers':
+        return `Tu ne peux mener que ${msg.arg} créature${msg.arg === '1' ? '' : 's'} à la fois (la Sylve en ajoute).`;
+      case 'pet_tired':
+        return `${creature} est à bout de forces et rentre se reposer jusqu'à demain.`;
+      case 'produce':
+        return `${this.content.objets[msg.arg ?? ''] ?? msg.arg} récupéré.`;
+      case 'scared':
+        return `Tu as frappé ${lower} : elle ne te fait plus confiance.`;
+    }
+    return NOTICES[msg.code] ?? msg.code;
+  }
+
   private setTurn(turn: TurnView): void {
     const entering = turn.engaged && !this.turn.engaged;
     this.turn = turn;
@@ -547,7 +636,11 @@ export class ValleyScene extends Phaser.Scene {
     if (!c) {
       const sprite = this.add.sprite(x, y, 'entities', frames[0]).setAlpha(0);
       this.tweens.add({ targets: sprite, alpha: 1, duration: 300 });
-      c = { view, sprite, bar: this.add.graphics().setDepth(3e6), warn: [] };
+      const tag = this.add.image(x, y - 9, 'heart').setOrigin(0.5, 1).setDepth(3e6).setVisible(false);
+      c = { view, sprite, bar: this.add.graphics().setDepth(3e6), warn: [], tag };
+      if (view.kind === 'hibou-lanterne') {
+        c.glow = this.add.image(x, y, 'glow').setDepth(2e6 + 0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+      }
       this.creatures.set(view.id, c);
     } else if (c.view.x !== view.x || c.view.y !== view.y) {
       this.tweens.killTweensOf(c.sprite);
@@ -557,17 +650,26 @@ export class ValleyScene extends Phaser.Scene {
     }
     c.view = view;
     c.sprite
-      .setFrame(view.burrowed ? frames[1] : frames[0])
+      .setFrame(view.burrowed || view.submissive ? frames[1] : frames[0])
       .setFlipX(view.facing === 'left')
       .setDepth(y + 0.4)
-      .setTint(view.stunned ? 0xb0b0ff : 0xffffff);
-    // Health bar, once hurt.
+      .setAlpha(view.resting ? 0.6 : 1)
+      .setTint(view.stunned ? 0xb0b0ff : view.submissive ? 0xd8d0b0 : 0xffffff);
+    // Health bar once hurt, and the trust gauge of a wild creature being won over.
     c.bar.clear();
+    const w = 12;
     if (view.hp < view.maxHp) {
-      const w = 12;
       c.bar.fillStyle(0x1d1d1d, 0.8).fillRect(x - w / 2, y - 10, w, 2);
-      c.bar.fillStyle(0xd2564a, 1).fillRect(x - w / 2, y - 10, (w * view.hp) / view.maxHp, 2);
+      c.bar.fillStyle(view.owner ? 0x8cc063 : 0xd2564a, 1).fillRect(x - w / 2, y - 10, (w * view.hp) / view.maxHp, 2);
     }
+    if (view.trustMax && (view.trust ?? 0) > 0) {
+      c.bar.fillStyle(0x1d1d1d, 0.8).fillRect(x - w / 2, y + 8, w, 2);
+      c.bar.fillStyle(0xf3a6b0, 1).fillRect(x - w / 2, y + 8, (w * (view.trust ?? 0)) / view.trustMax, 2);
+    }
+    c.tag
+      .setVisible(!!view.owner)
+      .setTint(view.owner === this.me ? 0xffffff : 0xa0a0a0)
+      .setAlpha(view.resting ? 0.4 : 1);
     // The tiles its next blow will hit, in red.
     c.warn.forEach((r) => r.destroy());
     c.warn = (view.warn ?? []).map((t) => {
@@ -585,6 +687,8 @@ export class ValleyScene extends Phaser.Scene {
     if (!c) return;
     this.creatures.delete(id);
     c.bar.destroy();
+    c.tag.destroy();
+    c.glow?.destroy();
     c.warn.forEach((r) => r.destroy());
     this.tweens.killTweensOf(c.sprite);
     this.tweens.add({
@@ -601,7 +705,7 @@ export class ValleyScene extends Phaser.Scene {
     const y = hit.y * TILE;
     const color = hit.target === 'player' ? '#ff8a73' : hit.amount === 0 ? '#bdbdbd' : '#fff4d6';
     const text = this.add
-      .text(x, y, hit.amount === 0 ? 'paré' : `-${hit.amount}`, {
+      .text(x, y, hit.dodged ? 'esquive' : hit.amount === 0 ? 'paré' : `-${hit.amount}`, {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '8px',
         fontStyle: 'bold',
@@ -663,7 +767,9 @@ export class ValleyScene extends Phaser.Scene {
           : view.load
             ? `Séchage : ${view.load}`
             : ''
-        : '',
+        : view.kind === 'enclos' && view.ready
+          ? `${view.ready} lait`
+          : '',
     );
   }
 
@@ -839,12 +945,46 @@ export class ValleyScene extends Phaser.Scene {
     const resource = [...this.resources.values()].some((r) => r.view.x === tx && r.view.y === ty && !r.view.depleted);
     const plot = this.plots.get(`${tx},${ty}`);
     const ripe = plot?.view.state === 'culture' && (plot.view.growth ?? 0) >= (plot.view.days ?? 1);
-    const foe = [...this.creatures.values()].some((c) => c.view.x === tx && c.view.y === ty);
-    const color = foe ? 0xff7a5c : ripe ? 0x9be36b : resource || plot ? 0xe0b25c : 0xf3ead2;
+    const faced = [...this.creatures.values()].find((c) => c.view.x === tx && c.view.y === ty);
+    const foe = faced !== undefined && hostile(faced.view);
+    const friend = faced !== undefined && !foe;
+    const color = foe ? 0xff7a5c : friend ? 0xf3a6b0 : ripe ? 0x9be36b : resource || plot ? 0xe0b25c : 0xf3ead2;
     this.facingMarker
       .setPosition(tx * TILE + TILE / 2, ty * TILE + TILE / 2)
-      .setStrokeStyle(1, color, foe || resource || plot ? 0.9 : 0.3)
+      .setStrokeStyle(1, color, foe || friend || resource || plot ? 0.9 : 0.3)
       .setVisible(!this.building || this.building === DISMANTLE);
+  }
+
+  /** A soft round light, drawn over the night veil by the owl's lantern, and a pixel heart for tamed creatures. */
+  private makeGlowTexture(): void {
+    const heart = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+    const hg = this.add.graphics();
+    heart.forEach((row, y) =>
+      [...row].forEach((ch, x) => {
+        if (ch === 'X') hg.fillStyle(0xf37a90, 1).fillRect(x, y, 1, 1);
+      }),
+    );
+    hg.generateTexture('heart', 7, 6);
+    hg.destroy();
+    const size = 96;
+    const tex = this.textures.createCanvas('glow', size, size);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, 'rgba(255, 214, 140, 0.55)');
+    grad.addColorStop(0.5, 'rgba(255, 190, 110, 0.18)');
+    grad.addColorStop(1, 'rgba(255, 180, 100, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    tex.refresh();
+  }
+
+  private updateGlows(): void {
+    const dark = this.night.alpha;
+    for (const c of this.creatures.values()) {
+      if (c.glow) c.glow.setPosition(c.sprite.x, c.sprite.y).setAlpha(Math.min(1, dark * 1.6));
+      if (c.tag.visible) c.tag.setPosition(c.sprite.x, c.sprite.y - (c.view.hp < c.view.maxHp ? 11 : 8));
+    }
   }
 
   /** Show roughly 22 × 14 tiles whatever the window size, in whole zoom steps. */
