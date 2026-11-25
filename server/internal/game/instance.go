@@ -232,6 +232,8 @@ func (in *Instance) Handle(c *Client, msg any) {
 			seq, res = m.Seq, in.domain.Dismantle(c.PlayerID, now)
 		case *protocol.ChestMove:
 			seq, res = m.Seq, in.domain.ChestMove(c.PlayerID, m.Op, m.Item, m.Count, now)
+		case *protocol.Talent:
+			seq, res = m.Seq, in.domain.Talent(c.PlayerID, m.Node, m.Op, now)
 		default:
 			in.sendTo(c, protocol.Error{T: protocol.TypeError, Message: "unexpected message"})
 			return

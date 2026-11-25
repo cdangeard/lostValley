@@ -10,7 +10,7 @@ import (
 )
 
 // Version is bumped whenever a message changes shape.
-const Version = 3
+const Version = 4
 
 // Directions a player can face or step in.
 const (
@@ -35,6 +35,7 @@ const (
 	TypeBuild     = "build"
 	TypeDismantle = "dismantle"
 	TypeChestMove = "chest_move"
+	TypeTalent    = "talent"
 )
 
 // Hello is the first message on a connection. PlayerID is a random token the
@@ -102,6 +103,22 @@ type ChestMove struct {
 	Count int    `json:"count"`
 }
 
+// Talent operations.
+const (
+	TalentTake   = "prendre"
+	TalentRefund = "retirer"
+)
+
+// Talent takes a node of the Constellation des Racines (it must be linked to
+// one already taken, and cost a point), or gives one back (it costs seeds of
+// oblivion, and the others must stay linked to the heart).
+type Talent struct {
+	T    string `json:"t"`
+	Seq  int    `json:"seq"`
+	Node string `json:"node"`
+	Op   string `json:"op"`
+}
+
 // DecodeClient parses a client message into its concrete type.
 func DecodeClient(raw []byte) (any, error) {
 	var head struct {
@@ -126,6 +143,8 @@ func DecodeClient(raw []byte) (any, error) {
 		msg = &Dismantle{}
 	case TypeChestMove:
 		msg = &ChestMove{}
+	case TypeTalent:
+		msg = &Talent{}
 	default:
 		return nil, fmt.Errorf("decode message: unknown type %q", head.T)
 	}
@@ -156,6 +175,7 @@ const (
 	TypeChest        = "chest"
 	TypeTurn         = "turn"
 	TypeHit          = "hit"
+	TypeProgress     = "progress"
 	TypeAck          = "ack"
 	TypeError        = "error"
 )
@@ -250,6 +270,32 @@ type CreatureView struct {
 	Stunned  bool   `json:"stunned,omitempty"`
 	Wave     bool   `json:"wave,omitempty"` // came with the night wave, after the crops
 	Warn     []Tile `json:"warn,omitempty"`
+	// Taming. Peaceful creatures never attack; a submissive one has given in
+	// and can be fed. Trust fills up to TrustMax, then the creature is tamed.
+	Peaceful   bool   `json:"peaceful,omitempty"`
+	Submissive bool   `json:"submissive,omitempty"`
+	Trust      int    `json:"trust,omitempty"`
+	TrustMax   int    `json:"trustMax,omitempty"`
+	Owner      string `json:"owner,omitempty"` // tamed: the player it is bound to
+	OwnerName  string `json:"ownerName,omitempty"`
+	Mode       string `json:"mode,omitempty"`    // tamed: "suit" (follows its player) or "maison" (stays home)
+	Resting    bool   `json:"resting,omitempty"` // tamed and worn out: home until morning
+}
+
+// Modes of a tamed creature.
+const (
+	ModeFollow = "suit"
+	ModeHome   = "maison"
+)
+
+// ProgressView is a player's level and talents.
+type ProgressView struct {
+	Level   int      `json:"level"`
+	XP      int      `json:"xp"`      // total experience
+	LevelXP int      `json:"levelXp"` // total experience at the start of this level
+	NextXP  int      `json:"nextXp"`  // total experience for the next level; 0 at the top
+	Points  int      `json:"points"`  // talent points not spent yet
+	Talents []string `json:"talents"` // nodes taken, besides the heart
 }
 
 // BuildingView is a building; X, Y is its top-left tile.
@@ -290,6 +336,7 @@ type Welcome struct {
 	Buildings []BuildingView `json:"buildings"`
 	Claim     string         `json:"claim"` // one char per tile, row by row: '1' inside the domain
 	Turn      TurnView       `json:"turn"`
+	Progress  ProgressView   `json:"progress"`
 }
 
 // Player is sent when a player appears, moves, turns, sleeps or wakes.
@@ -353,12 +400,31 @@ const (
 	NoticeWorkshop = "workshop"  // facing the workshop: open the build menu
 	NoticeDried    = "dried"     // rations collected from the drying rack
 	NoticeDrying   = "drying"    // crops hung on the drying rack
+	NoticeLevelUp  = "level_up"  // Arg: the new level; a talent point to spend
+	NoticeFed      = "fed"       // Arg: the species; it trusts you a little more
+	NoticeFull     = "not_hungry"
+	NoticeTamed    = "tamed"         // Arg: the species
+	NoticeHabitat  = "needs_habitat" // Arg: the building it needs, free, in the domain
+	NoticeSubdued  = "submissive"    // Arg: the species; it gives in and can be fed
+	NoticeFollow   = "follow"        // Arg: the species
+	NoticeStay     = "stay"          // Arg: the species
+	NoticeTooMany  = "too_many_followers"
+	NoticeTired    = "pet_tired" // Arg: the species; worn out, back home until morning
+	NoticeProduce  = "produce"   // collected what a tamed creature made
+	NoticeScared   = "scared"    // Arg: the species; you hit it and it no longer trusts you
 )
 
-// Notice is a short event for one player's screen.
+// Notice is a short event for one player's screen. Arg completes some codes.
 type Notice struct {
 	T    string `json:"t"`
 	Code string `json:"code"`
+	Arg  string `json:"arg,omitempty"`
+}
+
+// Progress is sent to a player when their experience, level or talents change.
+type Progress struct {
+	T        string       `json:"t"`
+	Progress ProgressView `json:"progress"`
 }
 
 // Creature is sent when a creature appears, moves, warns, is hit or changes.
@@ -426,6 +492,7 @@ type Hit struct {
 	X      int    `json:"x"`
 	Y      int    `json:"y"`
 	Amount int    `json:"amount"` // 0: blocked by armour
+	Dodged bool   `json:"dodged,omitempty"`
 }
 
 // Ack answers a Move or Use on the connection that sent it. Reason is a

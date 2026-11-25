@@ -77,6 +77,7 @@ func testContent(t *testing.T) *Content {
 	}
 	c.Time.RainChance = 0
 	c.Edge.Population = 0 // tests place their own creatures
+	c.Fauna = nil
 	return c
 }
 

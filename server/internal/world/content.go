@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -34,8 +35,9 @@ type Content struct {
 	StarterBag      map[string]int     `json:"sacDeDepart"`
 	Plots           PlotRules          `json:"parcelles"`
 	Mowing          struct {
-		SeedChance float64  `json:"chanceGraine"`
-		Seeds      []string `json:"graines"`
+		SeedChance   float64  `json:"chanceGraine"`
+		Seeds        []string `json:"graines"`
+		OblivionRate float64  `json:"chanceOubli"` // chance of a seed of oblivion, used to take back talent points
 	} `json:"fauchage"`
 	Crops     map[string]CropDef     `json:"cultures"`
 	Food      map[string]int         `json:"nourriture"` // item → health restored when eaten
@@ -45,6 +47,9 @@ type Content struct {
 		Population int      `json:"population"` // creatures kept at the forest edge
 		Species    []string `json:"especes"`
 	} `json:"lisiere"`
+	Fauna     []FaunaSpawn           `json:"faune"` // wild creatures that can be tamed
+	Taming    TamingRules            `json:"apprivoisement"`
+	Progress  ProgressRules          `json:"progression"`
 	Wave      WaveRules              `json:"vague"`
 	Buildings map[string]BuildingDef `json:"batiments"`
 	Domain    struct {
@@ -52,8 +57,79 @@ type Content struct {
 	} `json:"domaine"`
 	Items map[string]string `json:"objets"`
 
+	// ConstellationFile names the talent graph, next to the content file.
+	ConstellationFile string         `json:"constellation"`
+	Constellation     *Constellation `json:"-"`
+
 	seedToCrop map[string]string
 }
+
+// FaunaSpawn keeps Count wild creatures of a species around the valley.
+// Nocturnal species only come out at night.
+type FaunaSpawn struct {
+	Species string `json:"espece"`
+	Count   int    `json:"nombre"`
+}
+
+// TamingRules tune how trust is won and what tamed creatures do.
+type TamingRules struct {
+	MaxTrust       int `json:"confianceMax"`
+	AppetiteMins   int `json:"appetitMinutes"`   // game minutes before a creature eats again
+	BaseFollowers  int `json:"compagnonsDeBase"` // creatures that may follow a player before talents
+	FollowerRadius int `json:"rayonCompagnon"`   // a follower fights what comes this close to its player
+	GuardRadius    int `json:"rayonGarde"`       // a guard fights what comes this close to its den
+	NightHour      int `json:"heureNuit"`        // nocturnal creatures come out from this hour until morning
+}
+
+// TamingDef says how a species is tamed and what it does once tamed.
+type TamingDef struct {
+	Role       string         `json:"role"`              // production, garde or compagnon
+	Habitat    string         `json:"habitat"`           // the building it needs in the domain
+	Diet       map[string]int `json:"regime"`            // item → trust it gives
+	Product    string         `json:"produit,omitempty"` // production: what it gives each morning it was fed
+	StockMax   int            `json:"stockMax,omitempty"`
+	Submission float64        `json:"soumission,omitempty"` // hostile species: gives in below this share of its health
+}
+
+// Roles of tamed creatures.
+const (
+	RoleProduction = "production"
+	RoleGuard      = "garde"
+	RoleCompanion  = "compagnon"
+)
+
+// Behaviours of wild creatures.
+const (
+	BehaviorHostile  = ""         // attacks players (the default)
+	BehaviorPeaceful = "paisible" // never attacks; wanders and can be fed
+)
+
+// ProgressRules tune experience and levels.
+type ProgressRules struct {
+	FirstLevelXP int            `json:"xpPremierNiveau"` // experience from level 1 to 2
+	LevelStepXP  int            `json:"xpParNiveau"`     // each next level needs this much more
+	MaxLevel     int            `json:"niveauMax"`
+	RefundCost   int            `json:"coutOubli"` // seeds of oblivion to take back one point
+	XP           map[string]int `json:"xp"`        // activity → experience
+}
+
+// Activities that give experience (keys of ProgressRules.XP).
+const (
+	XPHarvest  = "recolte"
+	XPTill     = "labour"
+	XPSow      = "semis"
+	XPWater    = "arrosage"
+	XPResource = "ressource"
+	XPUproot   = "dessouchage"
+	XPBuild    = "construction"
+	XPCreature = "creature"
+	XPFeed     = "nourrir"
+	XPTame     = "apprivoisement"
+	XPProduce  = "production"
+)
+
+// OblivionSeed is the item spent to take back a talent point.
+const OblivionSeed = "graine-oubli"
 
 // ToolDef is one tool the player carries.
 type ToolDef struct {
@@ -113,9 +189,12 @@ type CreatureDef struct {
 		Damage  int    `json:"degats"`
 		Windup  int    `json:"preparation"` // ticks between the warning and the blow
 	} `json:"attaque"`
-	Weakness string             `json:"faiblesse"` // this tool deals double and ignores armour
-	Trait    string             `json:"trait"`
-	Loot     map[string]float64 `json:"butin"` // item → count; a fraction is a chance of one
+	Weakness  string             `json:"faiblesse"` // this tool deals double and ignores armour
+	Trait     string             `json:"trait"`
+	Loot      map[string]float64 `json:"butin"` // item → count; a fraction is a chance of one
+	Behavior  string             `json:"comportement,omitempty"`
+	Nocturnal bool               `json:"nocturne,omitempty"`
+	Taming    *TamingDef         `json:"apprivoisement,omitempty"` // nil: cannot be tamed
 }
 
 // WaveRules size the night attack on the fields.
@@ -163,13 +242,25 @@ type CropDef struct {
 	SeedChance     float64 `json:"chanceGraine,omitempty"`   // chance a harvest also gives a seed back
 }
 
-// LoadContent reads and checks the content file.
+// LoadContent reads and checks the content file, and the talent graph it
+// names (a path relative to the content file).
 func LoadContent(path string) (*Content, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return ParseContent(raw)
+	c, err := ParseContent(raw)
+	if err != nil {
+		return nil, err
+	}
+	if c.ConstellationFile != "" {
+		tree, err := LoadConstellation(filepath.Join(filepath.Dir(path), c.ConstellationFile))
+		if err != nil {
+			return nil, err
+		}
+		c.Constellation = tree
+	}
+	return c, nil
 }
 
 // ParseContent parses and checks content JSON.
@@ -248,6 +339,35 @@ func (c *Content) check() error {
 				return fmt.Errorf("unknown creature %q in lisiere or vague", sp)
 			}
 		}
+	}
+	for id, cr := range c.Creatures {
+		tm := cr.Taming
+		if tm == nil {
+			continue
+		}
+		if tm.Role != RoleProduction && tm.Role != RoleGuard && tm.Role != RoleCompanion {
+			return fmt.Errorf("creature %q: unknown taming role %q", id, tm.Role)
+		}
+		if _, ok := c.Buildings[tm.Habitat]; !ok {
+			return fmt.Errorf("creature %q lives in unknown building %q", id, tm.Habitat)
+		}
+		if len(tm.Diet) == 0 {
+			return fmt.Errorf("creature %q: needs a regime to be tamed", id)
+		}
+		if tm.Role == RoleProduction && (tm.Product == "" || tm.StockMax <= 0) {
+			return fmt.Errorf("creature %q: production needs produit and stockMax", id)
+		}
+	}
+	for _, f := range c.Fauna {
+		if _, ok := c.Creatures[f.Species]; !ok {
+			return fmt.Errorf("unknown creature %q in faune", f.Species)
+		}
+	}
+	if c.Taming.MaxTrust <= 0 {
+		c.Taming.MaxTrust = 100
+	}
+	if c.Progress.FirstLevelXP <= 0 || c.Progress.MaxLevel <= 1 {
+		return fmt.Errorf("progression: needs xpPremierNiveau and niveauMax")
 	}
 	if len(c.Wave.Species) == 0 || c.Wave.Hour < 0 || c.Wave.Hour > 23 {
 		return fmt.Errorf("vague: needs especes and an hour")

@@ -1,13 +1,14 @@
 package world
 
 import (
+	"sort"
 	"time"
 
 	"github.com/cdangeard/lostvalley/server/internal/protocol"
 )
 
 // SnapshotVersion is bumped when the saved shape changes incompatibly.
-const SnapshotVersion = 1
+const SnapshotVersion = 1 // phase 3 only added fields
 
 // Snapshot is everything worth saving about a domain. It is plain data,
 // stored as JSON (JSONB in PostgreSQL).
@@ -28,6 +29,20 @@ type DomainState struct {
 	Claim     string          `json:"claim,omitempty"` // '1' per tile of the domain, row by row
 	Chest     map[string]int  `json:"chest,omitempty"`
 	WaveDay   int             `json:"waveDay,omitempty"` // last day the night wave came
+	Pets      []PetState      `json:"pets,omitempty"`    // tamed creatures; wild ones are not saved
+}
+
+// PetState is a saved tamed creature.
+type PetState struct {
+	Kind    string `json:"kind"`
+	Owner   string `json:"owner"`
+	Mode    string `json:"mode"`
+	Home    int    `json:"home,omitempty"`
+	HP      int    `json:"hp"`
+	Fed     bool   `json:"fed,omitempty"`
+	Resting bool   `json:"resting,omitempty"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
 }
 
 // BuildingState is a saved building.
@@ -51,6 +66,8 @@ type PlotState struct {
 	Growth  int    `json:"growth,omitempty"`
 	Watered bool   `json:"watered,omitempty"`
 	Neglect int    `json:"neglect,omitempty"`
+	Sower   string `json:"sower,omitempty"`
+	DryDays int    `json:"dryDays,omitempty"`
 }
 
 // ResourceState is a saved resource node; untouched nodes are not saved.
@@ -68,16 +85,19 @@ type ResourceState struct {
 // PlayerState is a saved character. Players will later travel between
 // domains, so they are stored apart from the valley.
 type PlayerState struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	X      int            `json:"x"`
-	Y      int            `json:"y"`
-	Facing string         `json:"facing"`
-	Tools  []string       `json:"tools"`
-	Bag    map[string]int `json:"bag"`
-	Energy int            `json:"energy"`
-	HP     int            `json:"hp,omitempty"` // 0 in old saves: full health
-	Water  int            `json:"water"`
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	X       int            `json:"x"`
+	Y       int            `json:"y"`
+	Facing  string         `json:"facing"`
+	Tools   []string       `json:"tools"`
+	Bag     map[string]int `json:"bag"`
+	Energy  int            `json:"energy"`
+	HP      int            `json:"hp,omitempty"` // 0 in old saves: full health
+	Water   int            `json:"water"`
+	Level   int            `json:"level,omitempty"` // 0 in old saves: level 1
+	XP      int            `json:"xp,omitempty"`
+	Talents []string       `json:"talents,omitempty"`
 }
 
 // Snapshot captures the domain at now. The clock is advanced to now first so
@@ -87,7 +107,7 @@ func (d *Domain) Snapshot(now time.Time) (*Snapshot, []Event) {
 	s := &Snapshot{SavedAt: d.lastTick, Domain: DomainState{
 		Version: SnapshotVersion, Minutes: d.minutes, Weather: d.weather,
 		Plots: []PlotState{}, Resources: []ResourceState{},
-		Claim: d.claimString(), Chest: map[string]int{}, WaveDay: d.lastWaveDay,
+		Claim: d.claimString(), Chest: map[string]int{}, WaveDay: d.lastWaveDay, Pets: d.petStates(),
 	}}
 	for k, v := range d.chest {
 		if v > 0 {
@@ -100,7 +120,7 @@ func (d *Domain) Snapshot(now time.Time) (*Snapshot, []Event) {
 	}
 	for _, p := range d.sortedPlots() {
 		s.Domain.Plots = append(s.Domain.Plots, PlotState{X: p.At.X, Y: p.At.Y, State: p.State, Crop: p.Crop,
-			Growth: p.Growth, Watered: p.Watered, Neglect: p.Neglect})
+			Growth: p.Growth, Watered: p.Watered, Neglect: p.Neglect, Sower: p.Sower, DryDays: p.DryDays})
 	}
 	for _, r := range d.resources {
 		if r.Depleted || r.Removed || r.Hits != r.def().Hits {
@@ -109,8 +129,14 @@ func (d *Domain) Snapshot(now time.Time) (*Snapshot, []Event) {
 		}
 	}
 	for _, p := range d.sortedPlayers() {
-		s.Players = append(s.Players, PlayerState{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Facing: p.Facing,
-			Tools: append([]string{}, p.Tools...), Bag: p.bagCopy(), Energy: p.Energy, HP: p.HP, Water: p.Water})
+		ps := PlayerState{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Facing: p.Facing,
+			Tools: append([]string{}, p.Tools...), Bag: p.bagCopy(), Energy: p.Energy, HP: p.HP, Water: p.Water,
+			Level: p.Level, XP: p.XP}
+		for id := range p.Talents {
+			ps.Talents = append(ps.Talents, id)
+		}
+		sort.Strings(ps.Talents)
+		s.Players = append(s.Players, ps)
 	}
 	return s, events
 }
@@ -133,7 +159,8 @@ func (d *Domain) Restore(s *Snapshot) {
 		if !d.Map.Cultivable(at) || d.resAt[at] != nil || !validPlot(ps, d.content) {
 			continue
 		}
-		d.plots[at] = &Plot{At: at, State: ps.State, Crop: ps.Crop, Growth: ps.Growth, Watered: ps.Watered, Neglect: ps.Neglect}
+		d.plots[at] = &Plot{At: at, State: ps.State, Crop: ps.Crop, Growth: ps.Growth, Watered: ps.Watered, Neglect: ps.Neglect,
+			Sower: ps.Sower, DryDays: ps.DryDays}
 	}
 	for _, rs := range ds.Resources {
 		r := d.resAt[Point{rs.X, rs.Y}]
@@ -191,11 +218,35 @@ func (d *Domain) Restore(s *Snapshot) {
 			p.Bag[k] = v
 		}
 		p.Energy, p.Water = ps.Energy, ps.Water
-		if ps.HP > 0 {
-			p.HP = min(ps.HP, d.content.Health.Max)
+		p.Level, p.XP = max(1, ps.Level), ps.XP
+		if tree := d.content.Constellation; tree != nil {
+			for _, id := range ps.Talents {
+				if tree.Node(id) != nil && id != tree.Heart {
+					p.Talents[id] = true
+				}
+			}
+			// A changed constellation may leave nodes cut off: keep what still links to the heart.
+			reach := tree.connected(p.Talents, "")
+			for id := range p.Talents {
+				if !reach[id] {
+					delete(p.Talents, id)
+				}
+			}
 		}
+		for p.Points() < 0 {
+			for id := range p.Talents { // more nodes than levels (the rules changed): drop some
+				delete(p.Talents, id)
+				break
+			}
+		}
+		d.recomputeMods(p)
+		if ps.HP > 0 {
+			p.HP = ps.HP
+		}
+		d.clampStats(p)
 		d.players[p.ID] = p
 	}
+	d.restorePets(ds.Pets)
 }
 
 func validPlot(ps PlotState, c *Content) bool {

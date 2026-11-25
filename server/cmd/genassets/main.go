@@ -80,6 +80,17 @@ const (
 	fScarecrow
 	fFence
 	fChest
+	// Phase 3: creatures that can be tamed, and their habitats.
+	fGoat
+	fWolf
+	fWolfDown // subdued: lying low
+	fOwl
+	fPenTL // 2 × 2: four frames
+	fPenTR
+	fPenBL
+	fPenBR
+	fDen
+	fNestBox
 	entityCount
 )
 
@@ -258,6 +269,7 @@ func drawEntities(rng *rand.Rand) image.Image {
 	drawFarm(c)
 	drawCreatures(c)
 	drawBuildings(c)
+	drawTamable(c)
 	return c.img
 }
 
@@ -377,6 +389,90 @@ func drawBuildings(c canvas) {
 	c.rect(fChest, 4, 4, 1, 10, stoneD)
 	c.rect(fChest, 11, 4, 1, 10, stoneD)
 	c.rect(fChest, 7, 7, 2, 2, hex("#e0b25c"))
+}
+
+// drawTamable draws the creatures that can be tamed and their habitats.
+func drawTamable(c canvas) {
+	ink := hex("#1f1a14")
+	// Lichen goat: a pale body patched with green lichen, curled horns.
+	c.disc(fGoat, 8, 10, 5, hex("#d8d2bf"))
+	c.disc(fGoat, 4, 7, 3, hex("#e6e0cc"))
+	c.disc(fGoat, 10, 9, 2, hex("#8fae5e"))
+	c.disc(fGoat, 7, 12, 1.5, hex("#7a9a4e"))
+	c.rect(fGoat, 5, 14, 1, 2, hex("#6b5b48"))
+	c.rect(fGoat, 11, 14, 1, 2, hex("#6b5b48"))
+	c.px(fGoat, 3, 7, ink)
+	c.rect(fGoat, 2, 3, 2, 1, hex("#8a7a62"))
+	c.px(fGoat, 1, 4, hex("#8a7a62"))
+	c.rect(fGoat, 5, 3, 2, 1, hex("#8a7a62"))
+	c.px(fGoat, 7, 4, hex("#8a7a62"))
+	// Bramble wolf: grey-green fur bristling with thorns.
+	wolf, wolfD := hex("#5e6b5a"), hex("#434d40")
+	c.disc(fWolf, 8, 9, 5, wolf)
+	c.disc(fWolf, 4, 6, 3, wolf)
+	c.rect(fWolf, 2, 2, 1, 3, wolfD)
+	c.rect(fWolf, 5, 2, 1, 3, wolfD)
+	c.rect(fWolf, 12, 8, 3, 2, wolfD)
+	c.px(fWolf, 3, 6, hex("#f0d050"))
+	c.px(fWolf, 1, 7, ink)
+	c.rect(fWolf, 5, 13, 1, 3, wolfD)
+	c.rect(fWolf, 11, 13, 1, 3, wolfD)
+	for _, p := range [][2]int{{7, 4}, {10, 5}, {12, 6}, {9, 7}} {
+		c.px(fWolf, p[0], p[1], hex("#9a5a3a"))
+	}
+	// Lying low, ears flat.
+	c.disc(fWolfDown, 8, 12, 4, wolf)
+	c.rect(fWolfDown, 2, 10, 12, 4, wolf)
+	c.disc(fWolfDown, 3, 11, 2.5, wolfD)
+	c.px(fWolfDown, 2, 11, ink)
+	c.rect(fWolfDown, 12, 12, 3, 1, wolfD)
+	// Lantern owl: round, tawny, with a glowing chest.
+	c.disc(fOwl, 8, 9, 5.5, hex("#8a6a42"))
+	c.disc(fOwl, 8, 11, 3, hex("#f3d27a"))
+	c.disc(fOwl, 8, 11, 1.5, hex("#fff2b8"))
+	c.disc(fOwl, 6, 6, 1.8, hex("#efe6c8"))
+	c.disc(fOwl, 10, 6, 1.8, hex("#efe6c8"))
+	c.px(fOwl, 6, 6, ink)
+	c.px(fOwl, 10, 6, ink)
+	c.px(fOwl, 8, 8, hex("#d6a24a"))
+	c.px(fOwl, 4, 3, hex("#6b4f30"))
+	c.px(fOwl, 12, 3, hex("#6b4f30"))
+
+	wood, woodD := hex("#9a6a3c"), hex("#6b4a2a")
+	// Pen, 2 × 2: a rail fence around straw.
+	for _, f := range []int{fPenTL, fPenTR, fPenBL, fPenBR} {
+		c.fill(f, hex("#c9b46a"))
+		r := rand.New(rand.NewSource(int64(500 + f)))
+		for i := 0; i < 14; i++ {
+			c.rect(f, r.Intn(14)+1, r.Intn(14)+1, 2, 1, hex("#a8924e"))
+		}
+	}
+	for _, f := range []int{fPenTL, fPenTR} {
+		c.rect(f, 0, 0, tile, 2, wood)
+		c.rect(f, 0, 4, tile, 1, woodD)
+	}
+	for _, f := range []int{fPenBL, fPenBR} {
+		c.rect(f, 0, 14, tile, 2, wood)
+	}
+	for _, f := range []int{fPenTL, fPenBL} {
+		c.rect(f, 0, 0, 2, tile, wood)
+	}
+	for _, f := range []int{fPenTR, fPenBR} {
+		c.rect(f, 14, 0, 2, tile, wood)
+	}
+	c.rect(fPenBL, 6, 8, 5, 3, hex("#5a7d9e")) // a water trough
+	c.rect(fPenBL, 7, 9, 3, 1, hex("#8fb8dc"))
+	// Den: a mound of stones with a dark mouth.
+	c.disc(fDen, 8, 10, 7, hex("#7d8087"))
+	c.disc(fDen, 7, 8, 5, hex("#979aa1"))
+	c.disc(fDen, 8, 12, 3.5, hex("#2a2622"))
+	c.px(fDen, 4, 6, hex("#6f8f3a"))
+	c.px(fDen, 12, 7, hex("#6f8f3a"))
+	// Nest box: a little house on a post, with a round hole.
+	c.rect(fNestBox, 7, 9, 2, 7, woodD)
+	c.rect(fNestBox, 3, 3, 10, 8, wood)
+	c.rect(fNestBox, 2, 2, 12, 2, hex("#a8473a"))
+	c.disc(fNestBox, 8, 7, 2, hex("#2a2016"))
 }
 
 // drawFarm draws the bed and everything that grows in a plot.
