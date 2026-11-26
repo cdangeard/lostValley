@@ -4,6 +4,7 @@ import { LocalClock, cropStage, darkness } from '../clock';
 import { ConstellationPanel } from '../constellationPanel';
 import type { Content } from '../content';
 import { DISMANTLE, Hud } from '../hud';
+import { VillagePanel } from '../villagePanel';
 import { Connection, playerId, serverUrl } from '../net/Connection';
 import type {
   BuildingView,
@@ -16,6 +17,7 @@ import type {
   ResourceView,
   ServerMessage,
   TurnView,
+  VillagerView,
 } from '../net/protocol';
 import { footprint, footprintTiles } from '../placement';
 import type { Constellation } from '../talents';
@@ -69,6 +71,7 @@ const BUILDING_FRAMES: Record<string, number[]> = {
   nichoir: [48],
 };
 const F_CHEST = 38;
+const VILLAGER_FRAMES: Record<string, number> = { bram: 49, ysolde: 50, pimprenelle: 51 };
 
 const DIR_STEP: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
@@ -122,6 +125,12 @@ function hostile(v: CreatureView): boolean {
   return !v.owner && !v.peaceful && !v.submissive;
 }
 
+interface VillagerSprite {
+  view: VillagerView;
+  sprite: Phaser.GameObjects.Sprite;
+  label: Phaser.GameObjects.Text;
+}
+
 interface BuildingSprite {
   view: BuildingView;
   parts: Phaser.GameObjects.Image[];
@@ -139,6 +148,11 @@ export class ValleyScene extends Phaser.Scene {
   private conn!: Connection;
   private hud!: Hud;
   private talents!: ConstellationPanel;
+  private village!: VillagePanel;
+  private villagers = new Map<string, VillagerSprite>();
+  private lastGift = ''; // the item just given, to learn the villager's taste
+  private holdUse = false; // E closed a dialogue: wait for it to be released
+  private tools: string[] = [];
   private me = '';
   private players = new Map<string, PlayerSprite>();
   private resources = new Map<number, { view: ResourceView; sprite: Phaser.GameObjects.Sprite }>();
@@ -231,6 +245,15 @@ export class ValleyScene extends Phaser.Scene {
     };
     k(K.B).on('down', () => !this.talents.open && this.toggleBuild());
     k(K.T).on('down', () => this.toggleTalents());
+    k(K.R).on('down', () => this.toggleVillage());
+    for (const key of this.keys.use) {
+      key.on('down', () => {
+        if (this.village.talking) {
+          this.holdUse = true;
+          this.village.advance();
+        }
+      });
+    }
     k(K.ESC).on('down', () => this.closePanels());
     // 1–9 pick a hotbar slot; AZERTY rows send the same key codes.
     const digits = [K.ONE, K.TWO, K.THREE, K.FOUR, K.FIVE, K.SIX, K.SEVEN, K.EIGHT, K.NINE];
@@ -261,6 +284,17 @@ export class ValleyScene extends Phaser.Scene {
       (node) => this.conn.send({ t: 'talent', seq: 0, node, op: 'prendre' }),
       (node) => this.conn.send({ t: 'talent', seq: 0, node, op: 'retirer' }),
       () => this.toggleTalents(),
+    );
+    this.village = new VillagePanel(
+      this.content,
+      (_villager, item) => {
+        this.lastGift = item;
+        this.conn.send({ t: 'use', seq: 0, item });
+      },
+      (item) => this.conn.send({ t: 'craft', seq: 0, item }),
+      () => {
+        this.lastGift = '';
+      },
     );
     this.conn = new Connection({
       url: serverUrl(),
@@ -312,6 +346,12 @@ export class ValleyScene extends Phaser.Scene {
     if (this.turn.engaged && !this.turn.ready) return null;
     if (this.talents.open) return null;
     const down = (keys: Phaser.Input.Keyboard.Key[]) => keys.some((key) => key.isDown);
+    if (this.holdUse && !down(this.keys.use)) this.holdUse = false;
+    if (this.village.talking) {
+      // Walking away ends the conversation.
+      if ((['up', 'down', 'left', 'right'] as const).some((d) => down(this.keys[d]))) this.village.close();
+      else return null;
+    }
     for (const dir of ['up', 'down', 'left', 'right'] as const) {
       if (down(this.keys[dir])) {
         if (this.hud.chestOpen) this.hud.showChest(false);
@@ -326,7 +366,7 @@ export class ValleyScene extends Phaser.Scene {
         if (spot) return { kind: 'build', building: this.building, x: spot.x, y: spot.y };
         return null;
       }
-      if (this.hud.chestOpen) return null;
+      if (this.hud.chestOpen || this.holdUse) return null;
       return { kind: 'use', item: this.selected };
     }
     return null;
@@ -364,8 +404,19 @@ export class ValleyScene extends Phaser.Scene {
     if (open) this.pacer.reset();
   }
 
+  private toggleVillage(): void {
+    const open = !this.village.open;
+    this.closePanels();
+    if (open) {
+      this.village.setWorkshop(this.builtKinds().has('atelier'));
+      this.village.toggle();
+    }
+  }
+
   private closePanels(): void {
     this.talents?.show(false);
+    this.village?.hide();
+    this.village?.close();
     this.building = '';
     this.hud.showBuild(false, '');
     this.hud.showChest(false);
@@ -478,6 +529,10 @@ export class ValleyScene extends Phaser.Scene {
         this.clock.set(msg.clock, this.time.now);
         this.hud.setTools(msg.tools);
         this.hud.setInventory(msg.inventory ?? {});
+        this.tools = msg.tools;
+        this.village.setBag(msg.inventory ?? {}, msg.tools);
+        (msg.villagers ?? []).forEach((v) => this.upsertVillager(v));
+        this.village.setBonds(msg.bonds ?? []);
         this.hud.setStats(msg.stats);
         msg.creatures.forEach((c) => this.upsertCreature(c));
         msg.buildings.forEach((b) => this.upsertBuilding(b));
@@ -507,6 +562,7 @@ export class ValleyScene extends Phaser.Scene {
         break;
       case 'inventory':
         this.hud.setInventory(msg.items);
+        this.village.setBag(msg.items, this.tools);
         this.keepSelection();
         break;
       case 'clock':
@@ -527,12 +583,26 @@ export class ValleyScene extends Phaser.Scene {
       case 'creature':
         this.upsertCreature(msg.creature);
         break;
+      case 'villager':
+        this.upsertVillager(msg.villager);
+        break;
+      case 'bonds':
+        this.village.setBonds(msg.bonds);
+        break;
+      case 'dialogue':
+        this.closePanels();
+        this.pacer.reset();
+        // A gift from the panel, or the item in hand when E was pressed.
+        this.village.say(msg, this.lastGift || (['adore', 'aime', 'neutre', 'deteste'].includes(msg.mood) ? this.selected : undefined));
+        this.lastGift = '';
+        break;
       case 'creature_gone':
         this.removeCreature(msg.id, msg.how === 'mort');
         break;
       case 'building':
         this.upsertBuilding(msg.building);
         if (this.hud.buildOpen) this.hud.setBuilt(this.builtKinds());
+        this.village.setWorkshop(this.builtKinds().has('atelier'));
         break;
       case 'building_gone':
         this.removeBuilding(msg.id);
@@ -577,6 +647,11 @@ export class ValleyScene extends Phaser.Scene {
     this.replacePlots([]);
     [...this.creatures.keys()].forEach((id) => this.removeCreature(id, false));
     [...this.buildings.keys()].forEach((id) => this.removeBuilding(id));
+    this.villagers.forEach((v) => {
+      v.sprite.destroy();
+      v.label.destroy();
+    });
+    this.villagers.clear();
   }
 
   private setProgress(p: { level: number; xp: number; levelXp: number; nextXp: number; points: number; talents: string[] } | undefined): void {
@@ -588,6 +663,7 @@ export class ValleyScene extends Phaser.Scene {
   private noticeText(msg: NoticeMsg): string {
     const creature = this.content.creatures[msg.arg ?? '']?.nom ?? 'La créature';
     const lower = creature.toLowerCase();
+    const villager = this.content.villageois?.[msg.arg ?? '']?.nom ?? 'Quelqu’un';
     switch (msg.code) {
       case 'level_up':
         return `Niveau ${msg.arg} ! Un point de talent à placer (T).`;
@@ -615,6 +691,24 @@ export class ValleyScene extends Phaser.Scene {
         return `${this.content.objets[msg.arg ?? ''] ?? msg.arg} récupéré.`;
       case 'scared':
         return `Tu as frappé ${lower} : elle ne te fait plus confiance.`;
+      case 'villager_arrived':
+        return this.content.villageois?.[msg.arg ?? '']?.texteArrivee ?? `${villager} s'installe dans la vallée.`;
+      case 'couple':
+        return `${villager} et toi, c'est officiel ! (R pour voir où vous en êtes)`;
+      case 'engaged':
+        return `Fiançailles avec ${villager} ! Le mariage aura lieu dans ${this.content.romance?.joursAvantMariage ?? 3} jours.`;
+      case 'wedding':
+        return `Mariage de ${villager} aujourd'hui ! Les cloches sonnent dans toute la vallée.`;
+      case 'spouse_help': {
+        const help: Record<string, string> = {
+          arroser: 'a arrosé tes cultures',
+          reparer: 'a réparé tes clôtures',
+          nourrir: 'a nourri tes créatures',
+        };
+        return `${villager} ${help[this.content.villageois?.[msg.arg ?? '']?.aide ?? ''] ?? 'a aidé au domaine'} ce matin.`;
+      }
+      case 'crafted':
+        return `${this.content.objets[msg.arg ?? ''] ?? msg.arg} fabriqué.`;
     }
     return NOTICES[msg.code] ?? msg.code;
   }
@@ -624,6 +718,45 @@ export class ValleyScene extends Phaser.Scene {
     this.turn = turn;
     this.hud.setTurn(turn);
     if (entering) this.pacer.reset();
+  }
+
+  // ---------- villagers ----------
+
+  private upsertVillager(view: VillagerView): void {
+    const x = view.x * TILE + TILE / 2;
+    const y = view.y * TILE + TILE / 2;
+    const name = this.content.villageois?.[view.id]?.nom ?? view.id;
+    let v = this.villagers.get(view.id);
+    if (!v) {
+      const sprite = this.add.sprite(x, y, 'entities', VILLAGER_FRAMES[view.id] ?? PLAYER_FRAMES.down).setAlpha(0);
+      this.tweens.add({ targets: sprite, alpha: 1, duration: 500 });
+      const label = this.add
+        .text(x, y - 11, name, {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '6px',
+          color: '#f6c6d0',
+          stroke: '#1d2b1f',
+          strokeThickness: 2,
+          resolution: 4,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(3e6);
+      v = { view, sprite, label };
+      this.villagers.set(view.id, v);
+    } else if (v.view.x !== view.x || v.view.y !== view.y) {
+      this.tweens.killTweensOf([v.sprite, v.label]);
+      const far = Math.abs(view.x - v.view.x) + Math.abs(view.y - v.view.y) > 1;
+      if (far) {
+        v.sprite.setPosition(x, y);
+        v.label.setPosition(x, y - 11);
+      } else {
+        this.tweens.add({ targets: v.sprite, x, y, duration: STEP_MS * 3, ease: 'Sine.easeInOut' });
+        this.tweens.add({ targets: v.label, x, y: y - 11, duration: STEP_MS * 3, ease: 'Sine.easeInOut' });
+      }
+    }
+    v.view = view;
+    v.label.setText(view.spouse ? `${name} ♥` : name);
+    v.sprite.setFlipX(view.facing === 'left').setDepth(y + 0.45);
   }
 
   // ---------- creatures ----------

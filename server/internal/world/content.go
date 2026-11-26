@@ -57,6 +57,9 @@ type Content struct {
 	} `json:"domaine"`
 	Items map[string]string `json:"objets"`
 
+	Villagers map[string]VillagerDef `json:"villageois"`
+	Romance   RomanceRules           `json:"romance"`
+
 	// ConstellationFile names the talent graph, next to the content file.
 	ConstellationFile string         `json:"constellation"`
 	Constellation     *Constellation `json:"-"`
@@ -386,6 +389,9 @@ func (c *Content) check() error {
 		if _, ok := c.seedToCrop[s]; !ok {
 			return fmt.Errorf("fauchage gives unknown seed %q", s)
 		}
+	}
+	if err := c.checkVillagers(); err != nil {
+		return err
 	}
 	return nil
 }

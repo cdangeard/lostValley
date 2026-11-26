@@ -20,6 +20,8 @@ func sample() *world.Snapshot {
 			Claim:     "0110",
 			Chest:     map[string]int{"pierre": 9},
 			WaveDay:   3,
+			Villagers: []world.VillagerState{{ID: "bram", X: 1, Y: 2, SpotX: 1, SpotY: 2, Spouse: "ana-123456",
+				Bonds: map[string]world.BondState{"ana-123456": {Points: 1000, Stage: "marie", Seen: []int{2, 4}, Wedding: 9}}}},
 		},
 		Players: []world.PlayerState{
 			{ID: "ana-123456", Name: "Ana", X: 5, Y: 6, Facing: "up", Tools: []string{"houe"}, Bag: map[string]int{"navet": 3}, Energy: 42, HP: 6, Water: 7},
@@ -59,6 +61,10 @@ func roundTrip(t *testing.T, s Store) {
 	d := got.Domain
 	if len(d.Buildings) != 1 || d.Buildings[0] != want.Domain.Buildings[0] || d.Claim != "0110" || d.Chest["pierre"] != 9 || d.WaveDay != 3 {
 		t.Fatalf("phase 2 state: %+v", d)
+	}
+	if v := d.Villagers; len(v) != 1 || v[0].Spouse != "ana-123456" || v[0].Bonds["ana-123456"].Points != 1000 ||
+		len(v[0].Bonds["ana-123456"].Seen) != 2 {
+		t.Fatalf("villagers: %+v", v)
 	}
 	if len(got.Players) != 2 || got.Players[0].HP != 6 || got.Players[0].Energy != 41 || got.Players[0].Bag["navet"] != 3 || got.Players[1].Name != "Bob" {
 		t.Fatalf("players: %+v", got.Players)

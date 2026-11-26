@@ -10,7 +10,7 @@ import (
 )
 
 // Version is bumped whenever a message changes shape.
-const Version = 4
+const Version = 5
 
 // Directions a player can face or step in.
 const (
@@ -36,6 +36,7 @@ const (
 	TypeDismantle = "dismantle"
 	TypeChestMove = "chest_move"
 	TypeTalent    = "talent"
+	TypeCraft     = "craft"
 )
 
 // Hello is the first message on a connection. PlayerID is a random token the
@@ -119,6 +120,14 @@ type Talent struct {
 	Op   string `json:"op"`
 }
 
+// Craft makes Item (a romance token: bouquet, pendant) from its recipe. The
+// workshop must stand in the domain.
+type Craft struct {
+	T    string `json:"t"`
+	Seq  int    `json:"seq"`
+	Item string `json:"item"`
+}
+
 // DecodeClient parses a client message into its concrete type.
 func DecodeClient(raw []byte) (any, error) {
 	var head struct {
@@ -145,6 +154,8 @@ func DecodeClient(raw []byte) (any, error) {
 		msg = &ChestMove{}
 	case TypeTalent:
 		msg = &Talent{}
+	case TypeCraft:
+		msg = &Craft{}
 	default:
 		return nil, fmt.Errorf("decode message: unknown type %q", head.T)
 	}
@@ -176,6 +187,9 @@ const (
 	TypeTurn         = "turn"
 	TypeHit          = "hit"
 	TypeProgress     = "progress"
+	TypeDialogue     = "dialogue"
+	TypeVillager     = "villager"
+	TypeBonds        = "bonds"
 	TypeAck          = "ack"
 	TypeError        = "error"
 )
@@ -337,6 +351,73 @@ type Welcome struct {
 	Claim     string         `json:"claim"` // one char per tile, row by row: '1' inside the domain
 	Turn      TurnView       `json:"turn"`
 	Progress  ProgressView   `json:"progress"`
+	Villagers []VillagerView `json:"villagers"` // those who have settled in the valley
+	Bonds     []BondView     `json:"bonds"`     // the player's friendship with each of them
+}
+
+// VillagerView is a villager who lives in the valley.
+type VillagerView struct {
+	ID     string `json:"id"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Facing string `json:"facing"`
+	Spouse string `json:"spouse,omitempty"` // name of the player they married
+}
+
+// Romance stages of a bond.
+const (
+	StageNone    = ""
+	StageCouple  = "couple" // accepted the bouquet
+	StageEngaged = "fiance" // accepted the pendant: the wedding comes in a few days
+	StageMarried = "marie"  // lives in the house and helps every morning
+)
+
+// BondView is a player's friendship with a villager.
+type BondView struct {
+	Villager  string `json:"villager"`
+	Points    int    `json:"points"`
+	Hearts    int    `json:"hearts"`
+	MaxHearts int    `json:"maxHearts"` // 8 until a couple, then 10
+	Stage     string `json:"stage,omitempty"`
+	Talked    bool   `json:"talked,omitempty"`  // talked to today
+	Gifted    bool   `json:"gifted,omitempty"`  // gave a gift today
+	Wedding   int    `json:"wedding,omitempty"` // engaged: the day of the wedding
+}
+
+// Moods of a dialogue: how the villager took what the player did.
+const (
+	MoodTalk    = "parle"
+	MoodScene   = "scene" // a heart scene
+	MoodLove    = "adore"
+	MoodLike    = "aime"
+	MoodNeutral = "neutre"
+	MoodHate    = "deteste"
+	MoodAlready = "deja"    // already a gift today
+	MoodRefuse  = "refus"   // a romance token given too soon, or to someone taken
+	MoodBouquet = "bouquet" // now a couple
+	MoodPendant = "pendentif"
+)
+
+// Dialogue is what a villager says to the player who talked to them or gave
+// them something. Lines are shown one after the other.
+type Dialogue struct {
+	T        string   `json:"t"`
+	Villager string   `json:"villager"`
+	Mood     string   `json:"mood"`
+	Lines    []string `json:"lines"`
+	Delta    int      `json:"delta,omitempty"` // friendship points won or lost
+}
+
+// Villager is sent when a villager arrives, moves or marries.
+type Villager struct {
+	T        string       `json:"t"`
+	Villager VillagerView `json:"villager"`
+}
+
+// Bonds is sent to a player when their friendships change.
+type Bonds struct {
+	T     string     `json:"t"`
+	Bonds []BondView `json:"bonds"`
 }
 
 // Player is sent when a player appears, moves, turns, sleeps or wakes.
@@ -409,9 +490,15 @@ const (
 	NoticeFollow   = "follow"        // Arg: the species
 	NoticeStay     = "stay"          // Arg: the species
 	NoticeTooMany  = "too_many_followers"
-	NoticeTired    = "pet_tired" // Arg: the species; worn out, back home until morning
-	NoticeProduce  = "produce"   // collected what a tamed creature made
-	NoticeScared   = "scared"    // Arg: the species; you hit it and it no longer trusts you
+	NoticeTired    = "pet_tired"        // Arg: the species; worn out, back home until morning
+	NoticeProduce  = "produce"          // collected what a tamed creature made
+	NoticeArrival  = "villager_arrived" // Arg: the villager; settled in the valley this morning
+	NoticeCouple   = "couple"           // Arg: the villager; accepted the bouquet
+	NoticeEngaged  = "engaged"          // Arg: the villager; the wedding is in a few days
+	NoticeWedding  = "wedding"          // Arg: the villager; married today
+	NoticeHelp     = "spouse_help"      // Arg: the villager; helped the domain this morning
+	NoticeCrafted  = "crafted"          // Arg: the item
+	NoticeScared   = "scared"           // Arg: the species; you hit it and it no longer trusts you
 )
 
 // Notice is a short event for one player's screen. Arg completes some codes.

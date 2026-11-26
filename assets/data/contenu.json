@@ -221,6 +221,307 @@
     "ration": "Ration séchée",
     "dent-de-rongeur": "Dent de rongeur", "plume-noire": "Plume noire",
     "epine": "Épine", "eclat-de-carapace": "Éclat de carapace",
-    "graine-oubli": "Graines d'oubli", "lait-de-chevre": "Lait de chèvre"
+    "graine-oubli": "Graines d'oubli", "lait-de-chevre": "Lait de chèvre",
+    "bouquet-de-lierre": "Bouquet de lierre-cœur",
+    "pendentif-des-racines": "Pendentif des racines"
+  },
+  "romance": {
+    "pointsParCoeur": 100,
+    "coeursMax": 10,
+    "coeursRomance": 8,
+    "parler": 20,
+    "cadeau": {
+      "adore": 80,
+      "aime": 45,
+      "neutre": 20,
+      "deteste": -30
+    },
+    "joursAvantMariage": 3,
+    "bouquet": "bouquet-de-lierre",
+    "pendentif": "pendentif-des-racines",
+    "recettes": {
+      "bouquet-de-lierre": {
+        "fibre": 10,
+        "feve": 5
+      },
+      "pendentif-des-racines": {
+        "pierre": 20,
+        "eclat-de-carapace": 3
+      }
+    },
+    "arrosageConjoint": 8
+  },
+  "villageois": {
+    "bram": {
+      "nom": "Bram",
+      "titre": "forgeron de Valcendre",
+      "place": [
+        17,
+        15
+      ],
+      "arrivee": {
+        "batiment": "atelier"
+      },
+      "texteArrivee": "Bram, un forgeron de Valcendre, a entendu ton atelier tinter jusqu'à la route. Il s'installe près du chemin.",
+      "adore": [
+        "eclat-de-carapace",
+        "ble-ambre"
+      ],
+      "aime": [
+        "pierre",
+        "bois",
+        "ration"
+      ],
+      "deteste": [
+        "fibre",
+        "plume-noire"
+      ],
+      "aide": "reparer",
+      "repliques": {
+        "0": [
+          "Hm. Bonjour.",
+          "Ton atelier sonne juste. C'est rare, par ici.",
+          "La route de Valcendre passe à deux jours d'ici. Personne ne la prend plus."
+        ],
+        "2": [
+          "Le fer, ça ne ment pas. On le frappe, il répond.",
+          "J'ai réparé le loquet de ta barrière. Ne me remercie pas.",
+          "Tu as de la terre jusqu'aux coudes. Bon signe."
+        ],
+        "5": [
+          "Je dors mieux ici qu'à la ville. Le silence a un poids, tu sais.",
+          "Si tu croises des éclats de carapace, garde-les-moi. Ça fait un acier superbe.",
+          "Mon père disait qu'une vallée se juge à ses clôtures. La tienne tient."
+        ],
+        "8": [
+          "Je me surprends à guetter ta silhouette sur le chemin.",
+          "Tu restes un peu ? Le feu est encore chaud.",
+          "J'ai jamais su parler. Avec toi, ça vient presque."
+        ],
+        "couple": [
+          "Je t'ai gardé la meilleure place près de la forge.",
+          "Tes mains sont froides. Viens là.",
+          "Je forge un peu moins vite depuis toi. Je pense à autre chose."
+        ],
+        "marie": [
+          "J'ai resserré les gonds de la porte. Elle ne grincera plus.",
+          "Bonne journée, toi. Rentre entière, ou entier, ou comme tu veux, mais rentre.",
+          "Les clôtures sont d'aplomb. Le reste, c'est toi qui le tiens."
+        ]
+      },
+      "reactions": {
+        "adore": "... Ça. C'est exactement ce qu'il me fallait. Merci.",
+        "aime": "Du bon matériau. Je saurai quoi en faire.",
+        "neutre": "Ah. Merci, je suppose.",
+        "deteste": "Qu'est-ce que tu veux que je fasse de ça ? Garde-le.",
+        "deja": "Tu m'as déjà gâté aujourd'hui. Garde ça pour demain.",
+        "refus": "Je... non. Pas comme ça. Pas maintenant.",
+        "bouquet": "Du lierre-cœur. Tu sais ce que ça veut dire, à Valcendre ? ... Oui. Oui, je veux bien.",
+        "pendentif": "Un pendentif des racines. Je n'ai pas les mots. Alors je vais dire oui, et c'est tout."
+      },
+      "scenes": {
+        "2": [
+          "Bram frappe une barre de fer sans la regarder. Il te regarde, toi.",
+          "« Je suis parti de Valcendre parce que tout le monde y parlait trop fort. »",
+          "« Ici, on entend le fer chanter. Et toi qui sifflotes en arrosant. »"
+        ],
+        "4": [
+          "Bram te tend un petit crochet de fer, poli jusqu'à briller.",
+          "« Pour ton coffre. Le loquet d'origine ne valait rien. »",
+          "Il repart avant que tu puisses dire merci."
+        ],
+        "6": [
+          "Ce soir, la forge est éteinte. Bram est assis sur l'enclume, les mains vides.",
+          "« Mon frère est resté là-bas. On ne se parle plus. »",
+          "« Je me demandais si j'avais bien fait de venir. Je crois que oui. »"
+        ],
+        "8": [
+          "Bram tourne longtemps autour du pot avant de parler.",
+          "« À Valcendre, quand on tient à quelqu'un, on lui offre du lierre-cœur. »",
+          "« Je dis ça comme ça. Pour la culture générale. »"
+        ]
+      }
+    },
+    "ysolde": {
+      "nom": "Ysolde",
+      "titre": "herboriste des elfes de la Canopée",
+      "place": [
+        12,
+        6
+      ],
+      "arrivee": {
+        "domaineMin": 170
+      },
+      "texteArrivee": "La forêt a reculé, et quelqu'un est venu voir pourquoi. Ysolde, herboriste elfe, s'installe à l'orée de la Sylve.",
+      "adore": [
+        "navet-lune",
+        "feve-ronce",
+        "graine-oubli"
+      ],
+      "aime": [
+        "fibre",
+        "ble-ambre",
+        "lait-de-chevre"
+      ],
+      "deteste": [
+        "bois",
+        "dent-de-rongeur"
+      ],
+      "aide": "arroser",
+      "repliques": {
+        "0": [
+          "Tu coupes beaucoup d'arbres. Je compte.",
+          "La Sylve se souvient de chaque souche. Moi aussi.",
+          "Bonjour, défricheur. Ou défricheuse. La forêt ne fait pas la différence."
+        ],
+        "2": [
+          "Les navets-lune ne poussent que dans la terre qu'on oublie. Étrange, non ?",
+          "J'ai senti une menthe sauvage près de ta rivière. Ne la fauche pas.",
+          "Tu arroses mieux qu'avant. Les racines te remercient."
+        ],
+        "5": [
+          "Je croyais que les humains ne savaient que prendre. Tu me fais douter.",
+          "La rosée de ce matin avait un goût de pluie. Il pleuvra demain, peut-être.",
+          "Viens, je vais te montrer une feuille qui soigne les ampoules."
+        ],
+        "8": [
+          "Il y a un chant elfe pour les gens qui comptent. Je ne te le chanterai pas. Pas encore.",
+          "Tes mains sentent la terre et la sève. C'est une bonne odeur.",
+          "Reste. La lumière est jolie à cette heure."
+        ],
+        "couple": [
+          "J'ai planté une fleur qui n'existe qu'ici. Elle porte ton nom, en elfe.",
+          "Les anciens de la Canopée diraient que je me suis perdue. Je me suis trouvée.",
+          "Tu as encore abattu un arbre. Je te pardonne. Celui-là."
+        ],
+        "marie": [
+          "J'ai arrosé tes rangs les plus assoiffés. Ils chantaient de soif.",
+          "La maison sent le thym, maintenant. C'est moi.",
+          "Prends ce sachet d'herbes. Si tu tombes, il t'aidera à te relever."
+        ]
+      },
+      "reactions": {
+        "adore": "Oh. Tu as trouvé ça ? Tu écoutes vraiment la vallée...",
+        "aime": "Merci. Ça me servira pour mes onguents.",
+        "neutre": "C'est gentil. La pensée compte, dit-on.",
+        "deteste": "Du bois coupé. Tu me l'offres comme on offre un cadavre ?",
+        "deja": "Un cadeau par jour suffit. Les feuilles ne tombent pas toutes à la fois.",
+        "refus": "Non. Ce lierre-là doit être donné au bon moment, et ce n'est pas le bon.",
+        "bouquet": "Du lierre-cœur... Il ne pousse que là où on est aimé. Alors oui. Oui.",
+        "pendentif": "Les racines tiennent la terre ensemble. Je resterai, alors. Pour toujours."
+      },
+      "scenes": {
+        "2": [
+          "Ysolde est accroupie près d'une souche. Elle pose la main dessus.",
+          "« Il avait trois cents ans. Tu ne pouvais pas savoir. »",
+          "« La prochaine fois, laisse-moi lui dire au revoir avant. »"
+        ],
+        "4": [
+          "Ysolde t'attend avec un bol fumant.",
+          "« Une infusion d'écorce et de fibre. Pour la fatigue. »",
+          "« Ne fais pas cette tête. Ce n'est pas du poison. Pas aujourd'hui. »"
+        ],
+        "6": [
+          "Ysolde regarde vers le nord, vers les Cimes.",
+          "« On m'a envoyée surveiller les humains qui coupent la forêt. »",
+          "« Je n'ai rien envoyé là-haut depuis des semaines. Je ne sais plus quoi leur dire de toi. »"
+        ],
+        "8": [
+          "Ysolde tresse des tiges de lierre sans y penser.",
+          "« Chez nous, le lierre-cœur se donne une seule fois dans une vie. »",
+          "« Si quelqu'un m'en offrait un bouquet... je crois que je ne dirais pas non. »"
+        ]
+      }
+    },
+    "pimprenelle": {
+      "nom": "Pimprenelle",
+      "titre": "musicienne de la Cour des Fées",
+      "place": [
+        21,
+        20
+      ],
+      "arrivee": {
+        "apprivoises": 1
+      },
+      "texteArrivee": "Une créature t'a fait confiance, et la nouvelle a voleté jusqu'aux collines. Pimprenelle, fée musicienne, vient jouer dans ta vallée.",
+      "adore": [
+        "plume-noire",
+        "lait-de-chevre"
+      ],
+      "aime": [
+        "navet",
+        "feve",
+        "ble"
+      ],
+      "deteste": [
+        "pierre",
+        "epine"
+      ],
+      "aide": "nourrir",
+      "repliques": {
+        "0": [
+          "Tralala ! Oh, pardon, je répétais.",
+          "Tes bêtes ont de bonnes oreilles. Je leur ai joué un air.",
+          "Une vallée sans musique, c'est une soupe sans sel !"
+        ],
+        "2": [
+          "J'ai composé une gigue pour tes navets. Ils ont adoré. Enfin, je crois.",
+          "Les corbeaux chantent faux. Mais ils chantent !",
+          "Tu danses ? Non ? Tu danseras."
+        ],
+        "5": [
+          "À la Cour, on me trouvait trop bruyante. Ici, on me trouve juste assez.",
+          "J'ai appris à ta chèvre à taper du sabot en rythme. Presque.",
+          "Ta voix a une jolie note quand tu ris. Un la, je dirais."
+        ],
+        "8": [
+          "J'ai écrit une chanson. Elle parle de quelqu'un qui arrose ses champs. Aucun rapport avec toi.",
+          "Quand tu pars dans la forêt, ma flûte joue toute seule des airs tristes.",
+          "Tu veux bien rester jusqu'à la fin du morceau ?"
+        ],
+        "couple": [
+          "Notre chanson a un deuxième couplet maintenant !",
+          "Je t'ai tressé une couronne de trèfle. Ne la mange pas.",
+          "Les fées disent que l'amour, c'est un accord majeur. Elles ont raison."
+        ],
+        "marie": [
+          "J'ai donné à manger à tes bêtes en chantant. Elles en redemandent.",
+          "Debout, debout ! Le soleil est déjà levé et moi aussi !",
+          "Ce soir je te joue la berceuse des collines. Promis."
+        ]
+      },
+      "reactions": {
+        "adore": "Ooooh ! Pour moi ? Je vais en faire une chanson entière !",
+        "aime": "Miam ! Merci, merci !",
+        "neutre": "Oh, c'est... original ! Merci !",
+        "deteste": "Un caillou ? Pour une fée ? Tu veux que je m'envole avec ça ?",
+        "deja": "Encore un cadeau ? Tu vas me gâter ! Garde-le pour demain.",
+        "refus": "Hi hi, non non ! Pas encore. Une fée ne se laisse pas cueillir si vite !",
+        "bouquet": "Du lierre-cœur ! Je... je ne sais plus aucune note. Oui ! Oui oui oui !",
+        "pendentif": "Pour toujours, alors ? Même quand je joue faux ? ... D'accord. Pour toujours."
+      },
+      "scenes": {
+        "2": [
+          "Pimprenelle joue de la flûte assise sur ta clôture.",
+          "« Tu sais pourquoi je suis venue ? Ta créature t'a choisi. Ça s'entend, ces choses-là. »",
+          "« Les fées suivent les gens que les bêtes aiment. »"
+        ],
+        "4": [
+          "Pimprenelle te prend par les mains et te fait tourner.",
+          "« Une danse de la Cour ! Un pas à gauche, deux à droite, et on recommence ! »",
+          "Vous finissez tous les deux dans l'herbe, à bout de souffle."
+        ],
+        "6": [
+          "Pimprenelle est silencieuse, pour une fois.",
+          "« À la Cour, on m'a dit que je ne serais jamais première flûte. »",
+          "« Ici, je suis la seule flûte. Et tu m'écoutes. C'est mieux. »"
+        ],
+        "8": [
+          "Pimprenelle te glisse un bout de partition.",
+          "« C'est la chanson du lierre-cœur. On la joue aux fiançailles, chez nous. »",
+          "« Je dis ça, je dis rien. Mais si tu trouvais du lierre-cœur... »"
+        ]
+      }
+    }
   }
 }
