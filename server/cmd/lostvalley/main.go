@@ -25,13 +25,15 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
-	mapPath := flag.String("map", "../assets/maps/valley.json", "Tiled JSON map of the valley")
-	contentPath := flag.String("content", "../assets/data/contenu.json", "game content: crops, tools, pace of time")
-	dbURL := flag.String("db", os.Getenv("LV_DATABASE_URL"), "PostgreSQL URL; empty keeps everything in memory")
-	static := flag.String("static", "", "optional directory of the built client (client/dist) to serve at /")
-	origins := flag.String("origins", "localhost:*,127.0.0.1:*", "comma-separated extra origins allowed to open the WebSocket")
-	debug := flag.Bool("debug", false, "verbose logs")
+	// Every flag can also come from an LV_* environment variable (handy in
+	// containers); a flag given on the command line wins.
+	addr := flag.String("addr", envOr("LV_ADDR", ":8080"), "listen address (LV_ADDR)")
+	mapPath := flag.String("map", envOr("LV_MAP", "../assets/maps/valley.json"), "Tiled JSON map of the valley (LV_MAP)")
+	contentPath := flag.String("content", envOr("LV_CONTENT", "../assets/data/contenu.json"), "game content: crops, tools, pace of time (LV_CONTENT)")
+	dbURL := flag.String("db", os.Getenv("LV_DATABASE_URL"), "PostgreSQL URL; empty keeps everything in memory (LV_DATABASE_URL)")
+	static := flag.String("static", os.Getenv("LV_STATIC"), "optional directory of the built client (client/dist) to serve at / (LV_STATIC)")
+	origins := flag.String("origins", envOr("LV_ORIGINS", "localhost:*,127.0.0.1:*"), "comma-separated extra origins allowed to open the WebSocket (LV_ORIGINS)")
+	debug := flag.Bool("debug", os.Getenv("LV_DEBUG") == "1" || os.Getenv("LV_DEBUG") == "true", "verbose logs (LV_DEBUG)")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -114,4 +116,11 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

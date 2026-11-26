@@ -1,0 +1,54 @@
+# Déploiement de La Vallée Perdue (Coolify ou docker compose classique).
+# Voir la section « Déployer » du README.
+#
+# Coolify : ressource « Docker Compose » pointée sur ce fichier. Le proxy de
+# Coolify gère le domaine, le TLS et le WebSocket : aucun port n'est publié
+# sur l'hôte.
+
+services:
+  lostvalley:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Coolify : génère un domaine relié au port 8080 du conteneur
+      # (modifiable dans l'interface). Ignorée hors de Coolify.
+      - SERVICE_FQDN_LOSTVALLEY_8080
+      - LV_DATABASE_URL=postgres://${POSTGRES_USER:-vallee}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est requis}@postgres:5432/${POSTGRES_DB:-lostvalley}?sslmode=disable
+      # Origines supplémentaires autorisées pour /ws ; le domaine du jeu
+      # lui-même est toujours accepté. Ex. : autre-domaine.fr,*.exemple.org
+      - LV_ORIGINS=${LV_ORIGINS:-localhost:*,127.0.0.1:*}
+      - LV_DEBUG=${LV_DEBUG:-false}
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Le serveur sauvegarde la vallée à l'arrêt : lui laisser le temps.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-vallee}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est requis}
+      - POSTGRES_DB=${POSTGRES_DB:-lostvalley}
+    volumes:
+      # Les sauvegardes des vallées : volume persistant, à sauvegarder.
+      - lostvalley-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lostvalley-db:
