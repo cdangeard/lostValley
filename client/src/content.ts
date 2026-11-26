@@ -6,6 +6,24 @@ export interface Content {
   nourriture: Record<string, number>;
   creatures: Record<string, CreatureDef>;
   batiments: Record<string, BuildingDef>;
+  villageois?: Record<string, VillagerDef>;
+  romance?: RomanceRules;
+}
+
+export interface VillagerDef {
+  nom: string;
+  titre: string;
+  texteArrivee?: string;
+  aide: 'arroser' | 'reparer' | 'nourrir';
+}
+
+export interface RomanceRules {
+  coeursMax: number;
+  coeursRomance: number;
+  joursAvantMariage: number;
+  bouquet: string;
+  pendentif: string;
+  recettes: Record<string, Record<string, number>>;
 }
 
 export interface CreatureDef {

@@ -131,3 +131,34 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   #talents { inset: 8px; }
   #talents .tip { left: 8px; right: 8px; width: auto; }
 }
+/* Phase 4: villagers. */
+#village { display: none; pointer-events: auto; right: 12px; top: 92px; width: 320px; max-height: calc(100% - 200px);
+  overflow-y: auto; padding: 8px; }
+#village.show { display: flex; flex-direction: column; gap: 6px; }
+#village .title { color: var(--muted); font-size: 12px; margin-top: 4px; }
+#village .villager { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(224, 178, 92, 0.25); border-radius: 6px; padding: 6px 8px; }
+#village .villager .title, #dialogue .title { color: var(--muted); font-size: 12px; }
+#village .hearts, #dialogue .hearts { color: #e87a8f; letter-spacing: 1px; }
+#village .stage { color: var(--accent); font-size: 12px; letter-spacing: 0; margin-left: 6px; }
+#village .today, #village .empty { color: var(--muted); font-size: 11px; }
+#village .next { color: #f6d7a0; font-size: 12px; }
+#village .craft { display: flex; flex-wrap: wrap; gap: 2px 6px; font: inherit; font-size: 13px; color: var(--text); text-align: left;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(224, 178, 92, 0.25); border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+#village .craft .cost { width: 100%; color: var(--accent); font-size: 12px; }
+#village .craft[disabled] { opacity: 0.55; cursor: default; }
+#village .count, #dialogue .count { color: var(--accent); font-weight: 600; }
+#dialogue { display: none; pointer-events: auto; left: 50%; bottom: 120px; transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px)); padding: 10px 14px; border-color: rgba(232, 122, 143, 0.55); }
+#dialogue.show { display: block; }
+#dialogue .who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+#dialogue .who .hearts { margin-left: auto; font-size: 12px; }
+#dialogue .line { font-size: 15px; line-height: 1.5; min-height: 2.2em; }
+#dialogue .line.scene { font-style: italic; }
+#dialogue .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+#dialogue .actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+#dialogue button { font: inherit; font-size: 13px; color: var(--text); background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(224, 178, 92, 0.35); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+#dialogue button:hover { border-color: var(--accent); }
+#dialogue .gifts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; max-height: 180px; overflow-y: auto; }
+#dialogue .gifts button { text-align: left; }
+#dialogue .taste { color: #e87a8f; font-size: 11px; }

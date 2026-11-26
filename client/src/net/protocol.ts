@@ -1,6 +1,6 @@
 // Mirror of server/internal/protocol/messages.go. Change both together.
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
@@ -20,7 +20,9 @@ export interface Dismantle { t: 'dismantle'; seq: number }
 export interface ChestMove { t: 'chest_move'; seq: number; op: 'deposer' | 'prendre'; item: string; count: number }
 /** Take a node of the constellation (linked to one taken, costs a point), or give it back (costs seeds of oblivion). */
 export interface Talent { t: 'talent'; seq: number; node: string; op: 'prendre' | 'retirer' }
-export type ClientMessage = Hello | Move | Use | Wait | Build | Dismantle | ChestMove | Talent;
+/** Make a romance token (bouquet, pendant) from its recipe; the workshop must stand. */
+export interface Craft { t: 'craft'; seq: number; item: string }
+export type ClientMessage = Hello | Move | Use | Wait | Build | Dismantle | ChestMove | Talent | Craft;
 
 // ---------- server → client ----------
 
@@ -134,7 +136,30 @@ export interface Welcome {
   claim: string; // one char per tile, row by row: '1' inside the domain
   turn: TurnView;
   progress: ProgressView;
+  villagers: VillagerView[] | null;
+  bonds: BondView[] | null;
 }
+
+export interface VillagerView { id: string; x: number; y: number; facing: Dir; spouse?: string }
+
+/** '' · couple: accepted the bouquet · fiance: accepted the pendant · marie: lives in the house */
+export type Stage = '' | 'couple' | 'fiance' | 'marie';
+
+export interface BondView {
+  villager: string;
+  points: number;
+  hearts: number;
+  maxHearts: number; // 8 until a couple, then 10
+  stage?: Stage;
+  talked?: boolean; // talked to today
+  gifted?: boolean; // gave a gift today
+  wedding?: number; // engaged: day of the wedding
+}
+
+export type Mood = 'parle' | 'scene' | 'adore' | 'aime' | 'neutre' | 'deteste' | 'deja' | 'refus' | 'bouquet' | 'pendentif';
+export interface DialogueMsg { t: 'dialogue'; villager: string; mood: Mood; lines: string[]; delta?: number }
+export interface VillagerMsg { t: 'villager'; villager: VillagerView }
+export interface BondsMsg { t: 'bonds'; bonds: BondView[] }
 export interface PlayerMsg { t: 'player'; player: PlayerView }
 export interface PlayerLeft { t: 'player_left'; id: string }
 export interface ResourceMsg { t: 'resource'; resource: ResourceView }
@@ -165,7 +190,13 @@ export type NoticeCode =
   | 'too_many_followers'
   | 'pet_tired'
   | 'produce'
-  | 'scared';
+  | 'scared'
+  | 'villager_arrived'
+  | 'couple'
+  | 'engaged'
+  | 'wedding'
+  | 'spouse_help'
+  | 'crafted';
 export interface NoticeMsg { t: 'notice'; code: NoticeCode; arg?: string }
 export interface ProgressMsg { t: 'progress'; progress: ProgressView }
 export interface CreatureMsg { t: 'creature'; creature: CreatureView }
@@ -207,5 +238,8 @@ export type ServerMessage =
   | TurnMsg
   | HitMsg
   | ProgressMsg
+  | DialogueMsg
+  | VillagerMsg
+  | BondsMsg
   | Ack
   | ErrorMsg;
