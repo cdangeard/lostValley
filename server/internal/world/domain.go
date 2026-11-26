@@ -125,7 +125,8 @@ type Domain struct {
 	buildings      map[int]*Building
 	bAt            map[Point]*Building
 	nextBuildingID int
-	chest          map[string]int // the house chest, safe from death
+	chest          map[string]int       // the house chest, safe from death
+	villagers      map[string]*Villager // those who settled in the valley
 
 	creatures      map[int]*Creature
 	nextCreatureID int
@@ -151,8 +152,8 @@ func NewDomain(m *Map, c *Content, seed int64) *Domain {
 		Map: m, content: c, rng: rand.New(rand.NewSource(seed)),
 		players: map[string]*Player{}, resAt: map[Point]*ResourceNode{}, plots: map[Point]*Plot{},
 		buildings: map[int]*Building{}, bAt: map[Point]*Building{}, chest: map[string]int{},
-		creatures: map[int]*Creature{},
-		minutes:   float64(c.Time.WakeHour * 60), weather: protocol.WeatherSun,
+		creatures: map[int]*Creature{}, villagers: map[string]*Villager{},
+		minutes: float64(c.Time.WakeHour * 60), weather: protocol.WeatherSun,
 	}
 	d.initClaim()
 	for i, s := range m.Resources {
@@ -243,7 +244,8 @@ func (d *Domain) Welcome(id, mapName string) protocol.Welcome {
 	w := protocol.Welcome{T: protocol.TypeWelcome, Version: protocol.Version, You: id, Map: mapName,
 		Players: []protocol.PlayerView{}, Resources: make([]protocol.ResourceView, 0, len(d.resources)),
 		Plots: d.plotViews(), Clock: d.ClockView(), Tools: []string{}, Inventory: map[string]int{},
-		Creatures: d.creatureViews(), Buildings: d.buildingViews(), Claim: d.claimString()}
+		Creatures: d.creatureViews(), Buildings: d.buildingViews(), Claim: d.claimString(),
+		Villagers: d.villagerViews(), Bonds: d.bondViews(id)}
 	for _, p := range d.sortedPlayers() {
 		if p.Online {
 			w.Players = append(w.Players, p.view())
@@ -280,7 +282,7 @@ func (d *Domain) playerEvent(p *Player) Event {
 // Walkable reports whether a player may stand on p. Plots never block;
 // buildings and creatures do.
 func (d *Domain) Walkable(p Point) bool {
-	if d.Map.Blocked(p) || d.bAt[p] != nil || d.creatureAt(p) != nil {
+	if d.Map.Blocked(p) || d.bAt[p] != nil || d.creatureAt(p) != nil || d.villagerAt(p) != nil {
 		return false
 	}
 	if r := d.resAt[p]; r != nil && r.blocks() {
@@ -357,6 +359,10 @@ func (d *Domain) use(p *Player, item string, now time.Time) Result {
 		if events, hit := d.attack(p, item); hit {
 			return Result{OK: true, Events: events}
 		}
+	}
+	// A villager in front: a chat, or a gift from the bag.
+	if v := d.villagerAt(front); v != nil {
+		return d.useOnVillager(p, v, item)
 	}
 	// A creature in front: feed it, or tell a tamed one to follow or stay.
 	if c := d.creatureAt(front); c != nil {
@@ -601,6 +607,7 @@ func (d *Domain) Tick(now time.Time) []Event {
 	if step := d.halfHour(); step != d.clockStep {
 		d.clockStep = step
 		events = append(events, d.clockEvent())
+		events = append(events, d.wanderVillagers()...)
 	}
 	events = append(events, d.faunaClock()...)
 	if wave := d.maybeWave(); len(wave) > 0 {

@@ -80,6 +80,7 @@ func (d *Domain) morning(now time.Time, fainted bool) []Event {
 	events := []Event{d.clockEvent(), {Msg: protocol.Plots{T: protocol.TypePlots, Plots: d.plotViews()}}}
 	events = append(events, d.dawn()...)
 	events = append(events, d.petsMorning()...)
+	events = append(events, d.villagersMorning()...)
 	for _, b := range d.sortedBuildings() {
 		if b.Kind == BuildingRack {
 			events = append(events, d.buildingEvent(b))

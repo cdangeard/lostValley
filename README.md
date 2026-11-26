@@ -3,13 +3,15 @@
 Jeu de ferme et d'aventure en pixel art, jouable dans le navigateur, avec un serveur autoritaire.
 Le concept complet (univers, systèmes, roadmap) est dans le document de concept du projet.
 
-Ce dépôt contient les **phases 0 à 3 du MVP** : une vallée en tuiles de 16 px où l'on se
+Ce dépôt contient les **phases 0 à 4 du MVP** : une vallée en tuiles de 16 px où l'on se
 déplace case par case, coupe, mine et fauche avec ses outils, laboure, sème, arrose et récolte,
 au rythme d'un cycle jour/nuit, et où dormir sauvegarde la partie dans PostgreSQL. Depuis la
 phase 2, on y construit (atelier, puits, séchoir, épouvantail, clôtures), on agrandit le domaine
 en dessouchant, et on se bat **au pas** contre les créatures de la lisière et la vague nocturne
 qui vise les champs. Depuis la phase 3, chaque activité donne de l'expérience, chaque niveau un point
 à placer dans la **Constellation des Racines**, et l'on apprivoise trois créatures de la forêt.
+Depuis la phase 4, trois **villageois** s'installent à mesure que le domaine grandit ; on se lie
+d'amitié avec eux, et l'amitié peut devenir une romance, puis un mariage.
 Le serveur valide chaque action.
 
 ## Lancer le jeu en local
@@ -43,7 +45,8 @@ une culture mûre, E récolte quel que soit l'objet en main ; face au lit, E va 
 coffre, E l'ouvre. B ouvre le menu de construction (1 à 9 pour choisir, E pour poser, Échap pour
 fermer). Au pas, X passe son tour. T ouvre la Constellation des Racines. Face à une créature, E avec
 sa nourriture en main la nourrit ; face à une de tes créatures, E avec autre chose lui dit de te suivre
-ou de rester à la maison.
+ou de rester à la maison. Face à un villageois, E lui parle (ou lui offre l'objet en main s'il vient du
+sac) ; « Offrir… » dans la bulle choisit un cadeau dans le sac. R ouvre la liste des villageois.
 
 ## Ce qu'on peut faire (phase 1)
 
@@ -128,6 +131,26 @@ cd ../server && go run ./cmd/lostvalley -static ../client/dist
 # puis http://localhost:8080
 ```
 
+## Ce qu'on peut faire (phase 4)
+
+- **Trois villageois** arrivent un par un, le matin qui suit leur condition (une seule arrivée par
+  matin) : **Bram**, forgeron de Valcendre, quand l'atelier est construit ; **Pimprenelle**, fée
+  musicienne, quand une créature est apprivoisée ; **Ysolde**, herboriste elfe, quand le domaine a
+  reculé la forêt (170 cases). Ils se promènent autour de leur coin et bloquent le passage.
+- **Amitié** (par joueur et par villageois, 100 points par cœur) : la première discussion du jour
+  rapporte 20 ; un cadeau par jour rapporte 80 s'il l'adore, 45 s'il l'aime, 20 sinon, et en retire 30
+  s'il le déteste. Les goûts découverts sont retenus dans le navigateur (♥♥, ♥, ✗ dans la liste).
+  À 2, 4, 6 et 8 cœurs, une **scène** se joue à la discussion suivante.
+- **Romance**, ouverte à tous les personnages : l'amitié plafonne à 8 cœurs. Le **bouquet de
+  lierre-cœur** (10 fibres, 5 fèves, à fabriquer avec R quand l'atelier existe) offert à 8 cœurs
+  fait un couple, et le plafond passe à 10. Le **pendentif des racines** (20 pierres, 3 éclats de
+  carapace) offert à 10 cœurs fait des fiançailles : le mariage a lieu 3 matins plus tard. Une
+  romance à la fois par joueur, et un villageois pris ne l'est pas deux fois.
+- **Mariage** : le conjoint emménage près du lit et aide chaque matin : Ysolde arrose 8 cultures,
+  Bram répare clôtures et bâtiments, Pimprenelle nourrit les créatures apprivoisées.
+- Tout est dans `assets/data/contenu.json` (`villageois`, `romance`) : dialogues par palier de
+  cœurs, réactions, scènes, goûts, conditions d'arrivée.
+
 ## Organisation
 
 | Dossier | Contenu |
@@ -175,6 +198,7 @@ Le test PostgreSQL ne tourne que si `LV_TEST_DATABASE_URL` pointe vers une base 
 Saisons qui comptent pour les cultures (le calendrier défile, mais tout pousse en toute saison),
 qualité des récoltes, vente, forge et amélioration des outils, arrosoir et fronde au combat,
 bestiaire, humeur et élevage des créatures, montures, créatures qui voyagent avec leur joueur,
-comptes, visites et permissions sur les bâtiments et le coffre (phase 4), personnalisation du
+comptes, visites et permissions sur les bâtiments et le coffre (phase 5), personnalisation du
 personnage. La confiance d'une créature sauvage n'est pas sauvegardée (seules les créatures
-apprivoisées le sont).
+apprivoisées le sont). Les villageois n'ont pas encore d'emploi du temps (ils restent dehors la nuit),
+ni de boutique, ni d'anniversaire.

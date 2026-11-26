@@ -30,6 +30,7 @@ type DomainState struct {
 	Chest     map[string]int  `json:"chest,omitempty"`
 	WaveDay   int             `json:"waveDay,omitempty"` // last day the night wave came
 	Pets      []PetState      `json:"pets,omitempty"`    // tamed creatures; wild ones are not saved
+	Villagers []VillagerState `json:"villagers,omitempty"`
 }
 
 // PetState is a saved tamed creature.
@@ -108,6 +109,7 @@ func (d *Domain) Snapshot(now time.Time) (*Snapshot, []Event) {
 		Version: SnapshotVersion, Minutes: d.minutes, Weather: d.weather,
 		Plots: []PlotState{}, Resources: []ResourceState{},
 		Claim: d.claimString(), Chest: map[string]int{}, WaveDay: d.lastWaveDay, Pets: d.petStates(),
+		Villagers: d.villagerStates(),
 	}}
 	for k, v := range d.chest {
 		if v > 0 {
@@ -247,6 +249,7 @@ func (d *Domain) Restore(s *Snapshot) {
 		d.players[p.ID] = p
 	}
 	d.restorePets(ds.Pets)
+	d.restoreVillagers(ds.Villagers)
 }
 
 func validPlot(ps PlotState, c *Content) bool {

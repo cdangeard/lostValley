@@ -91,6 +91,10 @@ const (
 	fPenBR
 	fDen
 	fNestBox
+	// Phase 4: villagers.
+	fBram
+	fYsolde
+	fPimprenelle
 	entityCount
 )
 
@@ -270,6 +274,7 @@ func drawEntities(rng *rand.Rand) image.Image {
 	drawCreatures(c)
 	drawBuildings(c)
 	drawTamable(c)
+	drawVillagers(c)
 	return c.img
 }
 
@@ -586,6 +591,42 @@ func drawPlayer(c canvas, f int, dir string) {
 		c.rect(f, 5, 2, 3, 5, hair)
 		c.px(f, 9, 5, hex("#2b2b2b"))
 	}
+}
+
+// drawVillagers draws the three villagers facing down: Bram the smith of
+// Valcendre, Ysolde the elf herbalist and Pimprenelle the fairy musician.
+func drawVillagers(c canvas) {
+	eye := hex("#2b2b2b")
+	body := func(f int, skin, hair, top, topD, legs color.RGBA) {
+		c.rect(f, 5, 8, 6, 5, top)
+		c.rect(f, 5, 12, 6, 1, topD)
+		c.rect(f, 5, 13, 2, 2, legs)
+		c.rect(f, 9, 13, 2, 2, legs)
+		c.rect(f, 5, 2, 6, 6, skin)
+		c.rect(f, 5, 1, 6, 2, hair)
+		c.px(f, 6, 5, eye)
+		c.px(f, 9, 5, eye)
+	}
+	// Bram: broad, dark beard, leather apron over a grey shirt.
+	body(fBram, hex("#d9a77c"), hex("#3b2a20"), hex("#7c8088"), hex("#5d6168"), hex("#3a2a1e"))
+	c.rect(fBram, 4, 8, 1, 4, hex("#7c8088"))
+	c.rect(fBram, 11, 8, 1, 4, hex("#7c8088"))
+	c.rect(fBram, 6, 6, 4, 2, hex("#3b2a20"))
+	c.rect(fBram, 6, 9, 4, 4, hex("#8a5a32"))
+	// Ysolde: pale, long silver hair, pointed ears, a green robe to the ground.
+	body(fYsolde, hex("#f2dcc8"), hex("#d8dde3"), hex("#3f7a4a"), hex("#2f5e39"), hex("#3f7a4a"))
+	c.rect(fYsolde, 5, 2, 1, 7, hex("#d8dde3"))
+	c.rect(fYsolde, 10, 2, 1, 7, hex("#d8dde3"))
+	c.px(fYsolde, 4, 4, hex("#f2dcc8"))
+	c.px(fYsolde, 11, 4, hex("#f2dcc8"))
+	c.rect(fYsolde, 5, 13, 6, 2, hex("#2f5e39"))
+	// Pimprenelle: small, pink hair, translucent wings, a flute.
+	wing := color.RGBA{0xcf, 0xe8, 0xf7, 0xb0}
+	c.rect(fPimprenelle, 1, 7, 4, 4, wing)
+	c.rect(fPimprenelle, 11, 7, 4, 4, wing)
+	body(fPimprenelle, hex("#f6d6c2"), hex("#e86fa3"), hex("#f2a7c6"), hex("#d982a8"), hex("#7a4f6a"))
+	c.px(fPimprenelle, 4, 1, hex("#e86fa3"))
+	c.rect(fPimprenelle, 10, 9, 1, 4, hex("#c9a46a"))
 }
 
 // ---------- map ----------

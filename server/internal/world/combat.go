@@ -555,7 +555,7 @@ func (d *Domain) scared(p Point) bool {
 // passable reports whether c may step onto t. ignoreFences finds the way a
 // creature would take if fences were not there.
 func (d *Domain) passable(c *Creature, t Point, ignoreFences bool) bool {
-	if !d.Map.InBounds(t) || d.creatureAt(t) != nil || d.occupied(t) {
+	if !d.Map.InBounds(t) || d.creatureAt(t) != nil || d.occupied(t) || d.villagerAt(t) != nil {
 		return false
 	}
 	trait := d.cdef(c).Trait
