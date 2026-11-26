@@ -46,3 +46,12 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t lostvalley:ci .
+      - run: docker compose config --quiet
+        env:
+          POSTGRES_PASSWORD: ci
