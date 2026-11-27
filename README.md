@@ -51,9 +51,10 @@ sac) ; « Offrir… » dans la bulle choisit un cadeau dans le sac. R ouvre la l
 ## Déployer (Docker Compose, Coolify)
 
 Le `Dockerfile` à la racine construit **une seule image** : le client compilé est servi par le
-serveur Go, sur le même port que `/ws` (port 8080). Le WebSocket est donc sur la même origine que
-la page, sans réglage. `docker-compose.yml` y ajoute PostgreSQL 16, dont les données (toutes les
-vallées) sont dans le volume persistant `lostvalley-db`. Aucun port n'est publié sur l'hôte.
+serveur Go, sur le même port que `/ws` (port 80 dans le conteneur, 8080 en développement). Le
+WebSocket est donc sur la même origine que la page, sans réglage. `docker-compose.yml` y ajoute
+PostgreSQL 16, dont les données (toutes les vallées) sont dans le volume persistant
+`lostvalley-db`. Aucun port n'est publié sur l'hôte.
 
 **Sur Coolify**
 
@@ -62,9 +63,11 @@ vallées) sont dans le volume persistant `lostvalley-db`. Aucun port n'est publi
 2. Variables d'environnement : renseigner au minimum `POSTGRES_PASSWORD` (lettres et chiffres
    seulement, il est repris tel quel dans l'URL de connexion).
 3. Domaine : Coolify en génère un pour le service `lostvalley` (variable
-   `SERVICE_FQDN_LOSTVALLEY_8080`). Pour le tien, saisis-le dans le champ *Domains* du service
-   en gardant le port : `https://vallee.exemple.fr:8080`. Le proxy de Coolify s'occupe du TLS et
-   relaie le WebSocket (`wss://…/ws`) sans configuration.
+   `SERVICE_FQDN_LOSTVALLEY`). Pour le tien, saisis-le dans le champ *Domains* du service
+   **sans port** : `https://vallee.exemple.fr`. Le serveur écoute sur le port 80 du conteneur,
+   celui que le proxy de Coolify vise par défaut, donc rien ne se perd si Coolify retire un
+   `:port` au redéploiement. Le proxy s'occupe du TLS et relaie le WebSocket (`wss://…/ws`)
+   sans configuration. Si un ancien domaine porte encore `:8080`, retire ce suffixe.
 4. Déployer. Le service est sain quand `/healthz` répond ; il attend que PostgreSQL le soit.
 
 Un redéploiement arrête le serveur proprement (SIGTERM, 30 s de grâce) : la vallée est
@@ -92,7 +95,7 @@ docker compose up -d --build
 ```
 
 Le compose ne publie pas de port : place-le derrière ton reverse proxy (qui doit relayer les
-en-têtes `Upgrade`/`Connection` pour `/ws`), ou ajoute `ports: ["8080:8080"]` au service
+en-têtes `Upgrade`/`Connection` pour `/ws`), ou ajoute `ports: ["8080:80"]` au service
 `lostvalley` pour un essai en local.
 
 ## Ce qu'on peut faire (phase 1)

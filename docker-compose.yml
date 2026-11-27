@@ -12,23 +12,29 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      # Coolify : génère un domaine relié au port 8080 du conteneur
-      # (modifiable dans l'interface). Ignorée hors de Coolify.
-      - SERVICE_FQDN_LOSTVALLEY_8080
+      # Coolify : génère un domaine pour ce service (modifiable dans
+      # l'interface). Le serveur écoute sur le port 80 du conteneur, le port
+      # par défaut du proxy : le domaine n'a pas besoin de « :port ».
+      # Ignorée hors de Coolify.
+      - SERVICE_FQDN_LOSTVALLEY
       - LV_DATABASE_URL=postgres://${POSTGRES_USER:-vallee}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD est requis}@postgres:5432/${POSTGRES_DB:-lostvalley}?sslmode=disable
       # Origines supplémentaires autorisées pour /ws ; le domaine du jeu
       # lui-même est toujours accepté. Ex. : autre-domaine.fr,*.exemple.org
       - LV_ORIGINS=${LV_ORIGINS:-localhost:*,127.0.0.1:*}
       - LV_DEBUG=${LV_DEBUG:-false}
     expose:
-      - "8080"
+      - "80"
+    # Permet à l'utilisateur non root de l'image d'écouter sur le port 80
+    # (valeur par défaut de Docker récent, rendue explicite ici).
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
     depends_on:
       postgres:
         condition: service_healthy
     # Le serveur sauvegarde la vallée à l'arrêt : lui laisser le temps.
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/healthz"]
       interval: 15s
       timeout: 3s
       start_period: 10s
