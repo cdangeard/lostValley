@@ -27,14 +27,17 @@ WORKDIR /app
 COPY --from=server /out/lostvalley /app/lostvalley
 COPY assets/ /app/assets/
 COPY --from=client /src/client/dist /app/public
-ENV LV_ADDR=:8080 \
+ENV LV_ADDR=:80 \
     LV_MAP=/app/assets/maps/valley.json \
     LV_CONTENT=/app/assets/data/contenu.json \
     LV_STATIC=/app/public
+# Port 80 : le proxy de Coolify y envoie le trafic par défaut, sans port à
+# indiquer dans le domaine. Docker autorise un utilisateur non root à écouter
+# sous 1024 (net.ipv4.ip_unprivileged_port_start=0, fixé aussi dans le compose).
 USER vallee
-EXPOSE 8080
+EXPOSE 80
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:80/healthz || exit 1
 # Le serveur sauvegarde la vallée en recevant SIGTERM.
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/app/lostvalley"]
